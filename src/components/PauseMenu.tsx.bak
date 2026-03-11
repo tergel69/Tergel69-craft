@@ -1,0 +1,158 @@
+'use client';
+
+import { useGameStore } from '@/stores/gameStore';
+import { usePlayerStore } from '@/stores/playerStore';
+import { useInventoryStore } from '@/stores/inventoryStore';
+import { useWorldStore } from '@/stores/worldStore';
+import { resetChunkManager } from '@/engine/ChunkManager';
+import { worldStorage } from '@/engine/WorldStorage';
+
+export default function PauseMenu() {
+  const gameState = useGameStore((state) => state.gameState);
+  const setGameState = useGameStore((state) => state.setGameState);
+  const togglePause = useGameStore((state) => state.togglePause);
+  const renderDistance = useGameStore((state) => state.renderDistance);
+  const setRenderDistance = useGameStore((state) => state.setRenderDistance);
+  const fov = useGameStore((state) => state.fov);
+  const setFov = useGameStore((state) => state.setFov);
+  const mouseSensitivity = useGameStore((state) => state.mouseSensitivity);
+  const setMouseSensitivity = useGameStore((state) => state.setMouseSensitivity);
+  const shadersEnabled = useGameStore((state) => state.shadersEnabled);
+  const setShadersEnabled = useGameStore((state) => state.setShadersEnabled);
+  const saveCurrentWorld = useGameStore((state) => state.saveCurrentWorld);
+  const worldId = useGameStore((state) => state.worldId);
+
+  const playerPosition = usePlayerStore((state) => state.position);
+  const playerRotation = usePlayerStore((state) => state.rotation);
+  const worldModifications = useWorldStore((state) => state.modifications);
+
+  if (gameState !== 'paused') return null;
+
+  const handleResume = () => {
+    togglePause();
+  };
+
+  const handleQuit = async () => {
+    try {
+      // Save world data
+      await saveCurrentWorld(playerPosition, playerRotation);
+      
+      // Save chunk modifications
+      if (worldId) {
+        for (const [chunkKey, blockChanges] of worldModifications) {
+          const modifiedBlocks: { [index: string]: number } = {};
+          for (const [blockIndex, blockType] of blockChanges) {
+            modifiedBlocks[blockIndex.toString()] = blockType;
+          }
+          await worldStorage.saveChunkModifications(worldId, chunkKey, modifiedBlocks);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to save world:', error);
+    }
+
+    // Reset game state
+    usePlayerStore.getState().reset();
+    useInventoryStore.getState().reset();
+    useWorldStore.getState().reset();
+    resetChunkManager();
+    useGameStore.getState().resetGame();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+      <div className="bg-gray-800 p-6 rounded-lg border-4 border-gray-600 min-w-[400px]">
+        <h2 className="text-white text-2xl mb-6 text-center">Game Paused</h2>
+
+        {/* Resume button */}
+        <button
+          onClick={handleResume}
+          className="w-full py-3 mb-3 bg-green-700 hover:bg-green-600 text-white rounded border-2 border-green-500 transition-colors"
+        >
+          Back to Game
+        </button>
+
+        {/* Settings */}
+        <div className="mb-4 p-4 bg-gray-900 rounded border border-gray-700">
+          <h3 className="text-gray-300 mb-3 text-sm font-bold">Settings</h3>
+
+          {/* Render distance */}
+          <div className="mb-3">
+            <label className="flex justify-between text-gray-400 text-sm mb-1">
+              <span>Render Distance</span>
+              <span>{renderDistance} chunks</span>
+            </label>
+            <input
+              type="range"
+              min="2"
+              max="16"
+              value={renderDistance}
+              onChange={(e) => setRenderDistance(parseInt(e.target.value))}
+              className="w-full"
+            />
+          </div>
+
+          {/* FOV */}
+          <div className="mb-3">
+            <label className="flex justify-between text-gray-400 text-sm mb-1">
+              <span>FOV</span>
+              <span>{fov}°</span>
+            </label>
+            <input
+              type="range"
+              min="30"
+              max="110"
+              value={fov}
+              onChange={(e) => setFov(parseInt(e.target.value))}
+              className="w-full"
+            />
+          </div>
+
+          {/* Mouse sensitivity */}
+          <div>
+            <label className="flex justify-between text-gray-400 text-sm mb-1">
+              <span>Mouse Sensitivity</span>
+              <span>{(mouseSensitivity * 100).toFixed(0)}%</span>
+            </label>
+            <input
+              type="range"
+              min="10"
+              max="200"
+              value={mouseSensitivity * 100}
+              onChange={(e) => setMouseSensitivity(parseInt(e.target.value) / 100)}
+              className="w-full"
+            />
+          </div>
+
+          {/* Visual shaders / effects toggle */}
+          <div className="mt-3 flex items-center justify-between">
+            <span className="text-gray-400 text-sm">Enhanced Shaders</span>
+            <button
+              onClick={() => setShadersEnabled(!shadersEnabled)}
+              className={`px-3 py-1 rounded text-sm border ${
+                shadersEnabled
+                  ? 'bg-green-700 border-green-500 text-white'
+                  : 'bg-gray-700 border-gray-500 text-gray-200'
+              }`}
+            >
+              {shadersEnabled ? 'On' : 'Off'}
+            </button>
+          </div>
+        </div>
+
+        {/* Quit button */}
+        <button
+          onClick={handleQuit}
+          className="w-full py-3 bg-red-800 hover:bg-red-700 text-white rounded border-2 border-red-600 transition-colors"
+        >
+          Save and Quit to Menu
+        </button>
+
+        {/* Resume hint */}
+        <p className="text-gray-500 text-center text-sm mt-4">
+          Press ESC to resume
+        </p>
+      </div>
+    </div>
+  );
+}
