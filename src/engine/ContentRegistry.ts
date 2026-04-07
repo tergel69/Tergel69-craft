@@ -128,6 +128,7 @@ export interface AdvancementCriterion {
 }
 
 export interface BiomeDecoration {
+  id: string;
   biome: string;
   features: BiomeFeature[];
 }
