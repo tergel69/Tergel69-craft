@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { DAY_LENGTH } from '@/utils/constants';
 import { worldStorage, SavedWorld } from '@/engine/WorldStorage';
 import { useWorldStore } from '@/stores/worldStore';
+import { PerformanceProfile, DEFAULT_PERFORMANCE_PROFILE, PerformancePreset } from '@/utils/PerformanceProfile';
 
 export type GameMode = 'survival' | 'creative' | 'spectator';
 export type GameState = 'menu' | 'playing' | 'paused' | 'inventory' | 'crafting' | 'chest' | 'furnace' | 'enchanting' | 'loading' | 'dead';
@@ -25,6 +26,16 @@ export interface BreakingBlock {
   y: number;
   z: number;
   progress: number; // 0 to 1
+}
+
+
+
+export interface BreakingBlock {
+  x: number;
+  y: number;
+  z: number;
+  progress: number; // 0 → 1
+  // Face normal of the hit face — used by BlockBreakOverlay to orient the crack plane
   nx?: number;
   ny?: number;
   nz?: number;
@@ -55,6 +66,7 @@ interface GameStore {
   showDebug: boolean;
   shadersEnabled: boolean;
   cameraMode: CameraMode;
+  performanceProfile: PerformanceProfile;
 
   // World info
   worldId: string | null;
@@ -91,6 +103,7 @@ interface GameStore {
   saveCurrentWorld: (playerPos: { x: number; y: number; z: number }, playerRot: { yaw: number; pitch: number }) => Promise<void>;
   loadWorld: (worldId: string) => Promise<SavedWorld | null>;
   deleteWorld: (worldId: string) => Promise<void>;
+  setPerformanceProfile: (profile: PerformanceProfile | PerformancePreset) => void;
 }
 
 const initialState = {
@@ -120,6 +133,7 @@ const initialState = {
   worldInitMode: 'new' as WorldInitMode,
   activeContainer: null as { x: number; y: number; z: number; type: 'chest' | 'furnace' | 'enchanting' } | null,
   savedWorlds: [] as SavedWorld[],
+  performanceProfile: DEFAULT_PERFORMANCE_PROFILE,
 };
 
 export const useGameStore = create<GameStore>((set, get) => ({
@@ -276,6 +290,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
     } catch (e) {
       console.error('Failed to delete world:', e);
     }
+  },
+
+  setPerformanceProfile: (profile) => {
+    const newProfile = typeof profile === 'string' 
+      ? getPerformanceProfileFromPreset(profile)
+      : profile;
+    set({ performanceProfile: newProfile });
   },
 }));
 
