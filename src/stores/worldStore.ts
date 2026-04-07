@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { BlockType } from '@/data/blocks';
+import { ItemType } from '@/data/items';
 import { BiomeType } from '@/data/biomes';
 import { CHUNK_SIZE, CHUNK_HEIGHT } from '@/utils/constants';
 import { chunkKey, getBlockIndex, worldToChunk, worldToLocal } from '@/utils/coordinates';
@@ -8,6 +9,7 @@ export interface ChunkData {
   x: number;
   z: number;
   blocks: Uint8Array; // Flat array of block IDs
+  blockStates: Uint8Array; // Extra per-block state data (stairs/slabs/etc.)
   biomes: Uint8Array; // Biome data per column
   heightMap: Uint16Array; // Highest solid block per column
   lightMap: Uint8Array; // Light levels
@@ -16,17 +18,44 @@ export interface ChunkData {
   mesh?: unknown; // Three.js mesh reference
 }
 
+export interface ContainerSlot {
+  item: BlockType | ItemType | null;
+  count: number;
+  durability?: number;
+  enchantments?: Record<string, number>;
+}
+
+export interface ChestBlockEntity {
+  type: 'chest';
+  slots: ContainerSlot[];
+}
+
+export interface FurnaceBlockEntity {
+  type: 'furnace';
+  input: ContainerSlot;
+  fuel: ContainerSlot;
+  output: ContainerSlot;
+  burnTime: number;
+  cookTime: number;
+}
+
+export type BlockEntityData = ChestBlockEntity | FurnaceBlockEntity;
+
 interface WorldStore {
   // Chunk storage
   chunks: Map<string, ChunkData>;
   loadedChunks: Set<string>;
   dirtyChunks: Set<string>;
+  blockEntities: Map<string, BlockEntityData>;
+  loadedChunkVersion: number;
+  dirtyChunkVersion: number;
+  blockEntityVersion: number;
 
   // World seed
   seed: number;
 
   // Block modifications (for saving)
-  modifications: Map<string, Map<number, BlockType>>;
+  modifications: Map<string, Map<number, number>>;
 
   // Actions
   setSeed: (seed: number) => void;
@@ -34,7 +63,10 @@ interface WorldStore {
   setChunk: (x: number, z: number, data: ChunkData) => void;
   removeChunk: (x: number, z: number) => void;
   getBlock: (x: number, y: number, z: number) => BlockType;
-  setBlock: (x: number, y: number, z: number, block: BlockType) => void;
+  setBlock: (x: number, y: number, z: number, block: BlockType, state?: number) => void;
+  getBlockEntity: (x: number, y: number, z: number) => BlockEntityData | undefined;
+  setBlockEntity: (x: number, y: number, z: number, entity: BlockEntityData) => void;
+  removeBlockEntity: (x: number, y: number, z: number) => void;
   markChunkDirty: (x: number, z: number) => void;
   clearDirtyChunks: () => string[];
   isChunkLoaded: (x: number, z: number) => boolean;
@@ -49,6 +81,7 @@ function createEmptyChunk(x: number, z: number): ChunkData {
     x,
     z,
     blocks: new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE),
+    blockStates: new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE),
     biomes: new Uint8Array(CHUNK_SIZE * CHUNK_SIZE),
     heightMap: new Uint16Array(CHUNK_SIZE * CHUNK_SIZE),
     lightMap: new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE).fill(15),
@@ -57,10 +90,33 @@ function createEmptyChunk(x: number, z: number): ChunkData {
   };
 }
 
+function blockEntityKey(x: number, y: number, z: number): string {
+  return `${x},${y},${z}`;
+}
+
+function createEmptySlot(): ContainerSlot {
+  return { item: null, count: 0 };
+}
+
+function bumpVersions(
+  state: WorldStore,
+  patch: Partial<Pick<WorldStore, 'loadedChunkVersion' | 'dirtyChunkVersion' | 'blockEntityVersion'>>
+): Partial<WorldStore> {
+  return {
+    loadedChunkVersion: patch.loadedChunkVersion ?? state.loadedChunkVersion,
+    dirtyChunkVersion: patch.dirtyChunkVersion ?? state.dirtyChunkVersion,
+    blockEntityVersion: patch.blockEntityVersion ?? state.blockEntityVersion,
+  };
+}
+
 export const useWorldStore = create<WorldStore>((set, get) => ({
   chunks: new Map(),
   loadedChunks: new Set(),
   dirtyChunks: new Set(),
+  blockEntities: new Map(),
+  loadedChunkVersion: 0,
+  dirtyChunkVersion: 0,
+  blockEntityVersion: 0,
   seed: Date.now(),
   modifications: new Map(),
 
@@ -71,31 +127,37 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
   },
 
   setChunk: (x, z, data) => {
+    const state = get();
     const key = chunkKey(x, z);
-    set((state) => {
-      const newChunks = new Map(state.chunks);
-      const newLoadedChunks = new Set(state.loadedChunks);
-      newChunks.set(key, data);
-      newLoadedChunks.add(key);
-      return { chunks: newChunks, loadedChunks: newLoadedChunks };
-    });
+    state.chunks.set(key, data);
+    state.loadedChunks.add(key);
+    set(bumpVersions(state, { loadedChunkVersion: state.loadedChunkVersion + 1 }));
   },
 
   removeChunk: (x, z) => {
+    const state = get();
     const key = chunkKey(x, z);
-    set((state) => {
-      const newChunks = new Map(state.chunks);
-      const newLoadedChunks = new Set(state.loadedChunks);
-      const newDirtyChunks = new Set(state.dirtyChunks);
-      newChunks.delete(key);
-      newLoadedChunks.delete(key);
-      newDirtyChunks.delete(key);
-      return {
-        chunks: newChunks,
-        loadedChunks: newLoadedChunks,
-        dirtyChunks: newDirtyChunks,
-      };
-    });
+    state.chunks.delete(key);
+    state.loadedChunks.delete(key);
+    state.dirtyChunks.delete(key);
+
+    let removedBlockEntities = false;
+    for (const entityKey of Array.from(state.blockEntities.keys())) {
+      const [ex, , ez] = entityKey.split(',').map(Number);
+      const chunkCoord = worldToChunk(ex, ez);
+      if (chunkCoord.x === x && chunkCoord.z === z) {
+        state.blockEntities.delete(entityKey);
+        removedBlockEntities = true;
+      }
+    }
+
+    set(
+      bumpVersions(state, {
+        loadedChunkVersion: state.loadedChunkVersion + 1,
+        dirtyChunkVersion: state.dirtyChunkVersion + 1,
+        blockEntityVersion: removedBlockEntities ? state.blockEntityVersion + 1 : state.blockEntityVersion,
+      })
+    );
   },
 
   getBlock: (x, y, z) => {
@@ -112,31 +174,54 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
     return chunk.blocks[index] as BlockType;
   },
 
-  setBlock: (x, y, z, block) => {
+  setBlock: (x, y, z, block, stateBits = 0) => {
     if (y < 0 || y >= CHUNK_HEIGHT) return;
 
+    const store = get();
     const chunkCoord = worldToChunk(x, z);
     const key = chunkKey(chunkCoord.x, chunkCoord.z);
-    const { chunks, modifications } = get();
-    const chunk = chunks.get(key);
+    const chunk = store.chunks.get(key);
 
     if (!chunk) return;
 
     const local = worldToLocal(x, y, z);
     const index = getBlockIndex(local.x, local.y, local.z);
 
-    // Update block
     chunk.blocks[index] = block;
+    chunk.blockStates[index] = stateBits & 0xff;
     chunk.isDirty = true;
 
-    // Update height map
+    const entityKey = blockEntityKey(x, y, z);
+    let blockEntityChanged = false;
+    if (block === BlockType.CHEST) {
+      const existing = store.blockEntities.get(entityKey);
+      if (!existing || existing.type !== 'chest') {
+        store.blockEntities.set(entityKey, { type: 'chest', slots: Array.from({ length: 27 }, createEmptySlot) });
+        blockEntityChanged = true;
+      }
+    } else if (block === BlockType.FURNACE) {
+      const existing = store.blockEntities.get(entityKey);
+      if (!existing || existing.type !== 'furnace') {
+        store.blockEntities.set(entityKey, {
+          type: 'furnace',
+          input: createEmptySlot(),
+          fuel: createEmptySlot(),
+          output: createEmptySlot(),
+          burnTime: 0,
+          cookTime: 0,
+        });
+        blockEntityChanged = true;
+      }
+    } else if (store.blockEntities.delete(entityKey)) {
+      blockEntityChanged = true;
+    }
+
     const columnIndex = local.z * CHUNK_SIZE + local.x;
     if (block !== BlockType.AIR) {
       if (y > chunk.heightMap[columnIndex]) {
         chunk.heightMap[columnIndex] = y;
       }
     } else if (y === chunk.heightMap[columnIndex]) {
-      // Find new highest block
       let newHeight = 0;
       for (let checkY = y - 1; checkY >= 0; checkY--) {
         const checkIndex = getBlockIndex(local.x, checkY, local.z);
@@ -148,42 +233,63 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
       chunk.heightMap[columnIndex] = newHeight;
     }
 
-    // Store modification
-    if (!modifications.has(key)) {
-      modifications.set(key, new Map());
+    let chunkModifications = store.modifications.get(key);
+    if (!chunkModifications) {
+      chunkModifications = new Map();
+      store.modifications.set(key, chunkModifications);
     }
-    modifications.get(key)!.set(index, block);
+    chunkModifications.set(index, block | ((stateBits & 0xff) << 8));
 
-    // Mark this chunk and adjacent chunks as dirty (for mesh updates)
-    const dirtyChunks = new Set(get().dirtyChunks);
-    dirtyChunks.add(key);
-
-    // Check if block is on chunk boundary and mark neighbor chunks dirty
+    store.dirtyChunks.add(key);
     if (local.x === 0) {
-      dirtyChunks.add(chunkKey(chunkCoord.x - 1, chunkCoord.z));
+      store.dirtyChunks.add(chunkKey(chunkCoord.x - 1, chunkCoord.z));
     } else if (local.x === CHUNK_SIZE - 1) {
-      dirtyChunks.add(chunkKey(chunkCoord.x + 1, chunkCoord.z));
+      store.dirtyChunks.add(chunkKey(chunkCoord.x + 1, chunkCoord.z));
     }
     if (local.z === 0) {
-      dirtyChunks.add(chunkKey(chunkCoord.x, chunkCoord.z - 1));
+      store.dirtyChunks.add(chunkKey(chunkCoord.x, chunkCoord.z - 1));
     } else if (local.z === CHUNK_SIZE - 1) {
-      dirtyChunks.add(chunkKey(chunkCoord.x, chunkCoord.z + 1));
+      store.dirtyChunks.add(chunkKey(chunkCoord.x, chunkCoord.z + 1));
     }
 
-    set({ dirtyChunks });
+    set(
+      bumpVersions(store, {
+        dirtyChunkVersion: store.dirtyChunkVersion + 1,
+        blockEntityVersion: blockEntityChanged ? store.blockEntityVersion + 1 : store.blockEntityVersion,
+      })
+    );
+  },
+
+  getBlockEntity: (x, y, z) => {
+    return get().blockEntities.get(blockEntityKey(x, y, z));
+  },
+
+  setBlockEntity: (x, y, z, entity) => {
+    const state = get();
+    state.blockEntities.set(blockEntityKey(x, y, z), entity);
+    set(bumpVersions(state, { blockEntityVersion: state.blockEntityVersion + 1 }));
+  },
+
+  removeBlockEntity: (x, y, z) => {
+    const state = get();
+    if (state.blockEntities.delete(blockEntityKey(x, y, z))) {
+      set(bumpVersions(state, { blockEntityVersion: state.blockEntityVersion + 1 }));
+    }
   },
 
   markChunkDirty: (x, z) => {
-    set((state) => {
-      const newDirtyChunks = new Set(state.dirtyChunks);
-      newDirtyChunks.add(chunkKey(x, z));
-      return { dirtyChunks: newDirtyChunks };
-    });
+    const state = get();
+    state.dirtyChunks.add(chunkKey(x, z));
+    set(bumpVersions(state, { dirtyChunkVersion: state.dirtyChunkVersion + 1 }));
   },
 
   clearDirtyChunks: () => {
-    const dirty = Array.from(get().dirtyChunks);
-    set({ dirtyChunks: new Set() });
+    const state = get();
+    const dirty = Array.from(state.dirtyChunks);
+    if (dirty.length === 0) return dirty;
+
+    state.dirtyChunks.clear();
+    set(bumpVersions(state, { dirtyChunkVersion: state.dirtyChunkVersion + 1 }));
     return dirty;
   },
 
@@ -196,43 +302,47 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
   },
 
   reset: () => {
+    const state = get();
+    state.chunks.clear();
+    state.loadedChunks.clear();
+    state.dirtyChunks.clear();
+    state.blockEntities.clear();
+    state.modifications.clear();
     set({
-      chunks: new Map(),
-      loadedChunks: new Set(),
-      dirtyChunks: new Set(),
-      modifications: new Map(),
+      loadedChunkVersion: 0,
+      dirtyChunkVersion: 0,
+      blockEntityVersion: 0,
+      seed: state.seed,
     });
   },
 
   loadChunkModifications: (chunkKeyStr, blockChanges) => {
     const state = get();
-    
-    // Get or create the chunk
+
     let chunk = state.chunks.get(chunkKeyStr);
     if (!chunk) {
-      // Extract chunk coordinates from key (format: "x,z")
       const [x, z] = chunkKeyStr.split(',').map(Number);
       chunk = createEmptyChunk(x, z);
       state.chunks.set(chunkKeyStr, chunk);
     }
 
-    // Apply block changes
-    const modificationsMap = new Map<number, BlockType>();
-    
+    const modificationsMap = new Map<number, number>();
+
     for (const [indexStr, blockType] of Object.entries(blockChanges)) {
       const blockIndex = parseInt(indexStr);
-      const type = blockType as BlockType;
-      
-      // Update block in chunk
-      chunk.blocks[blockIndex] = type;
+      const type = blockType as number;
+
+      const blockId = type & 0xff;
+      const blockState = (type >>> 8) & 0xff;
+      chunk.blocks[blockIndex] = blockId as BlockType;
+      chunk.blockStates[blockIndex] = blockState;
       modificationsMap.set(blockIndex, type);
-      
-      // Update height map if necessary
+
       const x = (blockIndex % (CHUNK_SIZE * CHUNK_HEIGHT)) % CHUNK_SIZE;
       const y = Math.floor((blockIndex % (CHUNK_SIZE * CHUNK_HEIGHT)) / CHUNK_SIZE);
       const z = Math.floor(blockIndex / (CHUNK_SIZE * CHUNK_HEIGHT));
       const columnIndex = z * CHUNK_SIZE + x;
-      
+
       if (type !== BlockType.AIR) {
         if (y > chunk.heightMap[columnIndex]) {
           chunk.heightMap[columnIndex] = y;
@@ -250,18 +360,10 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
       }
     }
 
-    // Store modifications
-    const newModifications = new Map(state.modifications);
-    newModifications.set(chunkKeyStr, modificationsMap);
+    state.modifications.set(chunkKeyStr, modificationsMap);
+    state.dirtyChunks.add(chunkKeyStr);
 
-    // Mark chunk as dirty for mesh rebuild
-    const newDirtyChunks = new Set(state.dirtyChunks);
-    newDirtyChunks.add(chunkKeyStr);
-
-    set({
-      modifications: newModifications,
-      dirtyChunks: newDirtyChunks,
-    });
+    set(bumpVersions(state, { dirtyChunkVersion: state.dirtyChunkVersion + 1 }));
   },
 
   loadAllChunkModifications: (allModifications) => {
@@ -294,4 +396,23 @@ export function setBlockInChunk(chunk: ChunkData, localX: number, y: number, loc
 
   const index = getBlockIndex(localX, y, localZ);
   chunk.blocks[index] = block;
+  chunk.blockStates[index] = 0;
+}
+
+export function setBlockStateInChunk(chunk: ChunkData, localX: number, y: number, localZ: number, state: number): void {
+  if (y < 0 || y >= CHUNK_HEIGHT) return;
+  if (localX < 0 || localX >= CHUNK_SIZE) return;
+  if (localZ < 0 || localZ >= CHUNK_SIZE) return;
+
+  const index = getBlockIndex(localX, y, localZ);
+  chunk.blockStates[index] = state & 0xff;
+}
+
+export function getBlockStateFromChunk(chunk: ChunkData, localX: number, y: number, localZ: number): number {
+  if (y < 0 || y >= CHUNK_HEIGHT) return 0;
+  if (localX < 0 || localX >= CHUNK_SIZE) return 0;
+  if (localZ < 0 || localZ >= CHUNK_SIZE) return 0;
+
+  const index = getBlockIndex(localX, y, localZ);
+  return chunk.blockStates[index] ?? 0;
 }

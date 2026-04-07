@@ -42,37 +42,86 @@ export default function HUD() {
 }
 
 function Crosshair({ breakProgress }: { breakProgress: number }) {
+  // Determine color based on break progress
+  const getBreakColor = () => {
+    if (breakProgress < 0.25) return 'rgba(255, 255, 255, 0.9)';
+    if (breakProgress < 0.5) return 'rgba(255, 200, 100, 0.95)';
+    if (breakProgress < 0.75) return 'rgba(255, 140, 50, 0.95)';
+    return 'rgba(255, 80, 50, 1)';
+  };
+
+  const breakColor = getBreakColor();
+
   return (
     <div className="absolute inset-0 flex items-center justify-center">
-      <div className="relative w-8 h-8">
-        {/* Crosshair lines */}
-        <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-white mix-blend-difference" />
-        <div className="absolute left-1/2 top-0 bottom-0 w-0.5 bg-white mix-blend-difference" />
+      <div className="relative w-12 h-12">
+        {/* Enhanced crosshair with glow effect */}
+        <div className="absolute inset-0 flex items-center justify-center">
+          {/* Outer glow */}
+          <div className="absolute w-10 h-10 rounded-full bg-white opacity-10 blur-sm" />
+          
+          {/* Crosshair lines with segments */}
+          {/* Top segment */}
+          <div className="absolute top-0 w-0.5 h-3 bg-white mix-blend-difference drop-shadow-lg" />
+          {/* Bottom segment */}
+          <div className="absolute bottom-0 w-0.5 h-3 bg-white mix-blend-difference drop-shadow-lg" />
+          {/* Left segment */}
+          <div className="absolute left-0 h-0.5 w-3 bg-white mix-blend-difference drop-shadow-lg" />
+          {/* Right segment */}
+          <div className="absolute right-0 h-0.5 w-3 bg-white mix-blend-difference drop-shadow-lg" />
+          
+          {/* Center dot */}
+          <div className="absolute w-1.5 h-1.5 bg-white mix-blend-difference rounded-full" />
+        </div>
 
-        {/* Breaking progress circle */}
+        {/* Breaking progress with enhanced visuals */}
         {breakProgress > 0 && (
           <svg
             className="absolute inset-0 w-full h-full -rotate-90"
             viewBox="0 0 36 36"
           >
+            {/* Outer pulsing ring */}
+            <circle
+              cx="18"
+              cy="18"
+              r="16"
+              fill="none"
+              stroke={breakColor}
+              strokeWidth="1"
+              opacity="0.3"
+              strokeDasharray="4 4"
+            />
             {/* Background circle */}
             <circle
               cx="18"
               cy="18"
               r="14"
               fill="none"
-              stroke="rgba(0,0,0,0.5)"
-              strokeWidth="3"
+              stroke="rgba(0,0,0,0.6)"
+              strokeWidth="4"
             />
-            {/* Progress circle */}
+            {/* Progress circle with gradient effect */}
             <circle
               cx="18"
               cy="18"
               r="14"
               fill="none"
-              stroke="rgba(255,255,255,0.9)"
-              strokeWidth="3"
+              stroke={breakColor}
+              strokeWidth="4"
               strokeDasharray={`${breakProgress * 88} 88`}
+              strokeLinecap="round"
+              style={{ filter: 'drop-shadow(0 0 3px ' + breakColor + ')' }}
+            />
+            {/* Inner progress indicator */}
+            <circle
+              cx="18"
+              cy="18"
+              r="10"
+              fill="none"
+              stroke={breakColor}
+              strokeWidth="1.5"
+              opacity="0.7"
+              strokeDasharray={`${breakProgress * 63} 63`}
               strokeLinecap="round"
             />
           </svg>

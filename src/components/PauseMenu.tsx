@@ -10,6 +10,7 @@ import { useGameStore } from '@/stores/gameStore';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useInventoryStore } from '@/stores/inventoryStore';
 import { useWorldStore } from '@/stores/worldStore';
+import { normalizeMouseSensitivity } from '@/stores/gameStore';
 
 type Tab = 'pause' | 'settings';
 
@@ -19,7 +20,7 @@ export function PauseMenu() {
   const worldName    = useGameStore(s => s.worldName);
   const gameMode     = useGameStore(s => s.gameMode);
   const worldTime    = useGameStore(s => s.worldTime);
-  const mouseSens    = useGameStore(s => s.mouseSensitivity);
+  const mouseSens    = useGameStore(s => normalizeMouseSensitivity(s.mouseSensitivity));
   const setMouseSens = useGameStore(s => s.setMouseSensitivity);
   const fov          = useGameStore(s => s.fov);
   const setFov       = useGameStore(s => s.setFov);
@@ -38,7 +39,7 @@ export function PauseMenu() {
     if (gameState === 'paused') {
       setRenderValue(useGameStore.getState().renderDistance);
       setFovValue(useGameStore.getState().fov);
-      setSensValue(useGameStore.getState().mouseSensitivity);
+      setSensValue(normalizeMouseSensitivity(useGameStore.getState().mouseSensitivity));
       setTab('pause');
     }
   }, [gameState]);
@@ -62,6 +63,7 @@ export function PauseMenu() {
     try { usePlayerStore.getState().reset(); } catch {}
     try { useInventoryStore.getState().reset(); } catch {}
     try { useWorldStore.getState().reset(); } catch {}
+    try { useGameStore.getState().openContainer(null); } catch {}
     setGameState('menu');
   };
 

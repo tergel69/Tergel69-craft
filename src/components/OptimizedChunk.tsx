@@ -348,3 +348,10 @@ export default function OptimizedChunk({ x, z, version }: ChunkProps) {
 
   return <group ref={groupRef} position={[x * CHUNK_SIZE, 0, z * CHUNK_SIZE]} />;
 }
+
+export function clearMaterialCache(): void {
+  materialCache.forEach((material) => {
+    material.dispose();
+  });
+  materialCache.clear();
+}

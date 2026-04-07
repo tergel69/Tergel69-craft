@@ -4,35 +4,30 @@ import { worldStorage, SavedWorld } from '@/engine/WorldStorage';
 import { useWorldStore } from '@/stores/worldStore';
 
 export type GameMode = 'survival' | 'creative' | 'spectator';
-export type GameState = 'menu' | 'playing' | 'paused' | 'inventory' | 'crafting' | 'loading';
+export type GameState = 'menu' | 'playing' | 'paused' | 'inventory' | 'crafting' | 'chest' | 'furnace' | 'enchanting' | 'loading' | 'dead';
 export type CameraMode = 'firstPerson' | 'thirdPerson';
+export type WorldInitMode = 'new' | 'loaded';
+export type WorldGenerationMode = 'classic' | 'new_generation';
+
+const DEFAULT_MOUSE_SENSITIVITY = 0.002;
+
+export function normalizeMouseSensitivity(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_MOUSE_SENSITIVITY;
+
+  // Old saves/UI stored this as a large multiplier-like value. Convert those
+  // legacy settings into the small raw delta scale used by pointer lock now.
+  const normalized = value > 0.05 ? value / 1000 : value;
+  return Math.max(0.0002, Math.min(0.01, normalized));
+}
 
 export interface BreakingBlock {
   x: number;
   y: number;
   z: number;
   progress: number; // 0 to 1
-}
-
-
-
-export interface BreakingBlock {
-  x: number;
-  y: number;
-  z: number;
-  progress: number; // 0 → 1
-  // Face normal of the hit face — used by BlockBreakOverlay to orient the crack plane
   nx?: number;
   ny?: number;
   nz?: number;
-}
-
-export interface GameMessage {
-  id: string;
-  text: string;
-  type: 'info' | 'warning' | 'error' | 'success';
-  duration: number;
-  timestamp: number;
 }
 
 interface GameStore {
@@ -42,6 +37,13 @@ interface GameStore {
   isLoading: boolean;
   loadingProgress: number;
   loadingMessage: string;
+
+  // Block breaking
+  breakingBlock: BreakingBlock | null;
+
+  // Time
+  worldTime: number; // 0 to DAY_LENGTH
+  dayCount: number;
   isPaused: boolean;
 
   // Settings
@@ -58,14 +60,10 @@ interface GameStore {
   worldId: string | null;
   worldName: string;
   worldSeed: number;
+  worldGenerationMode: WorldGenerationMode;
+  worldInitMode: WorldInitMode;
+  activeContainer: { x: number; y: number; z: number; type: 'chest' | 'furnace' | 'enchanting' } | null;
   savedWorlds: SavedWorld[];
-
-  // Block breaking
-  breakingBlock: BreakingBlock | null;
-
-  // Time
-  worldTime: number; // 0 to DAY_LENGTH
-  dayCount: number;
 
   // Actions
   setGameState: (state: GameState) => void;
@@ -81,10 +79,14 @@ interface GameStore {
   setMusicVolume: (volume: number) => void;
   setSoundVolume: (volume: number) => void;
   toggleDebug: () => void;
-  setShadersEnabled: (enabled: boolean) => void;
   setWorldInfo: (name: string, seed: number) => void;
+  setWorldGenerationMode: (mode: WorldGenerationMode) => void;
+  setWorldInitMode: (mode: WorldInitMode) => void;
+  resetGame: () => void;
+  setShadersEnabled: (enabled: boolean) => void;
   toggleCameraMode: () => void;
   setWorldId: (id: string | null) => void;
+  openContainer: (container: { x: number; y: number; z: number; type: 'chest' | 'furnace' | 'enchanting' } | null) => void;
   loadSavedWorlds: () => Promise<void>;
   saveCurrentWorld: (playerPos: { x: number; y: number; z: number }, playerRot: { yaw: number; pitch: number }) => Promise<void>;
   loadWorld: (worldId: string) => Promise<SavedWorld | null>;
@@ -101,10 +103,11 @@ const initialState = {
   worldTime: DAY_LENGTH / 4, // Start at sunrise (6:00)
   dayCount: 1,
   isPaused: false,
-  // Performance-safe default. Players can raise this if hardware allows.
-  renderDistance: 5,
+  // Slightly lower default render distance for better performance; players
+  // can increase this in the pause menu if their hardware can handle it.
+  renderDistance: 6,
   fov: 70,
-  mouseSensitivity: 0.002,
+  mouseSensitivity: DEFAULT_MOUSE_SENSITIVITY,
   musicVolume: 0.5,
   soundVolume: 1.0,
   showDebug: false,
@@ -113,6 +116,9 @@ const initialState = {
   worldId: null as string | null,
   worldName: 'New World',
   worldSeed: Date.now(),
+  worldGenerationMode: 'classic' as WorldGenerationMode,
+  worldInitMode: 'new' as WorldInitMode,
+  activeContainer: null as { x: number; y: number; z: number; type: 'chest' | 'furnace' | 'enchanting' } | null,
   savedWorlds: [] as SavedWorld[],
 };
 
@@ -159,12 +165,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   setRenderDistance: (distance) =>
-    set({ renderDistance: Math.max(2, Math.min(24, distance)) }),
+    set({ renderDistance: Math.max(2, Math.min(16, distance)) }),
 
   setFov: (fov) => set({ fov: Math.max(30, Math.min(110, fov)) }),
 
   setMouseSensitivity: (sensitivity) =>
-    set({ mouseSensitivity: Math.max(0.0002, Math.min(0.01, sensitivity)) }),
+    set({ mouseSensitivity: normalizeMouseSensitivity(sensitivity) }),
 
   setMusicVolume: (volume) =>
     set({ musicVolume: Math.max(0, Math.min(1, volume)) }),
@@ -183,9 +189,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   setWorldInfo: (name, seed) => set({ worldName: name, worldSeed: seed }),
 
+  setWorldGenerationMode: (mode) => set({ worldGenerationMode: mode }),
+
+  setWorldInitMode: (mode) => set({ worldInitMode: mode }),
+
   resetGame: () => set(initialState),
 
   setWorldId: (id) => set({ worldId: id }),
+
+  openContainer: (container) => set({ activeContainer: container }),
 
   loadSavedWorlds: async () => {
     try {
@@ -210,6 +222,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       id: worldId,
       name: state.worldName,
       seed: state.worldSeed,
+      generationMode: state.worldGenerationMode,
       createdAt: Date.now(),
       lastPlayed: Date.now(),
       playerPosition: playerPos,
@@ -237,6 +250,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
           worldId: world.id,
           worldName: world.name,
           worldSeed: world.seed,
+          worldGenerationMode: world.generationMode ?? 'classic',
+          worldInitMode: 'loaded',
           worldTime: world.worldTime,
           dayCount: world.dayCount,
           gameMode: world.gameMode as GameMode,

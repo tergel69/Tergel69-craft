@@ -1,8 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { useGameStore } from '@/stores/gameStore';
-import { usePlayerStore } from '@/stores/playerStore';
-import { useInventoryStore } from '@/stores/inventoryStore';
-import { useWorldStore } from '@/stores/worldStore';
 import { worldManager } from '@/utils/WorldManager';
 import { worldDatabase } from '@/utils/WorldDatabase';
 import { WorldMetadata } from '@/utils/WorldDatabase';
@@ -21,6 +17,7 @@ export const WorldManager: React.FC<WorldManagerProps> = ({ onWorldSelected, onB
   const [newWorldName, setNewWorldName] = useState('');
   const [newWorldSeed, setNewWorldSeed] = useState('');
   const [newWorldGameMode, setNewWorldGameMode] = useState<'survival' | 'creative'>('survival');
+  const [newWorldGenerationMode, setNewWorldGenerationMode] = useState<'classic' | 'new_generation'>('classic');
   const [selectedWorld, setSelectedWorld] = useState<string | null>(null);
 
   useEffect(() => {
@@ -52,7 +49,7 @@ export const WorldManager: React.FC<WorldManagerProps> = ({ onWorldSelected, onB
       setError(null);
       
       const seed = newWorldSeed.trim() ? parseInt(newWorldSeed) : Date.now();
-      const worldId = await worldManager.createNewWorld(newWorldName.trim(), seed, newWorldGameMode);
+      const worldId = await worldManager.createNewWorld(newWorldName.trim(), seed, newWorldGameMode, newWorldGenerationMode);
       
       // Reset form
       setNewWorldName('');
@@ -190,6 +187,32 @@ export const WorldManager: React.FC<WorldManagerProps> = ({ onWorldSelected, onB
                   disabled={isLoading}
                 />
                 <span>Creative</span>
+              </label>
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label>Generation</label>
+            <div className="game-mode-options">
+              <label className={`mode-option ${newWorldGenerationMode === 'classic' ? 'active' : ''}`}>
+                <input
+                  type="radio"
+                  value="classic"
+                  checked={newWorldGenerationMode === 'classic'}
+                  onChange={(e) => setNewWorldGenerationMode(e.target.value as 'classic' | 'new_generation')}
+                  disabled={isLoading}
+                />
+                <span>Classic</span>
+              </label>
+              <label className={`mode-option ${newWorldGenerationMode === 'new_generation' ? 'active' : ''}`}>
+                <input
+                  type="radio"
+                  value="new_generation"
+                  checked={newWorldGenerationMode === 'new_generation'}
+                  onChange={(e) => setNewWorldGenerationMode(e.target.value as 'classic' | 'new_generation')}
+                  disabled={isLoading}
+                />
+                <span>New Generation</span>
               </label>
             </div>
           </div>

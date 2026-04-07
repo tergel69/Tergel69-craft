@@ -1,5 +1,7 @@
-import { useWorldStore } from '@/stores/worldStore';
+import { useWorldStore, getBlockStateFromChunk } from '@/stores/worldStore';
 import { BlockType, BLOCKS, isSolid, isLiquid } from '@/data/blocks';
+import { worldToChunk, worldToLocal } from '@/utils/coordinates';
+import { resolveSpawnLocation } from '@/utils/spawn';
 import {
   GRAVITY,
   TERMINAL_VELOCITY,
@@ -56,11 +58,10 @@ export function intersectsSolid(aabb: AABB): boolean {
       for (let z = minZ; z <= maxZ; z++) {
         const block = worldStore.getBlock(x, y, z);
         if (isSolid(block)) {
-          const blockAABB: AABB = {
-            minX: x, minY: y, minZ: z,
-            maxX: x + 1, maxY: y + 1, maxZ: z + 1,
-          };
-          if (aabbIntersects(aabb, blockAABB)) return true;
+          const boxes = getBlockCollisionBoxes(x, y, z, block);
+          for (const blockAABB of boxes) {
+            if (aabbIntersects(aabb, blockAABB)) return true;
+          }
         }
       }
     }
@@ -74,6 +75,128 @@ export function aabbIntersects(a: AABB, b: AABB): boolean {
     a.minY < b.maxY && a.maxY > b.minY &&
     a.minZ < b.maxZ && a.maxZ > b.minZ
   );
+}
+
+function canFenceConnectTo(block: BlockType): boolean {
+  if (block === BlockType.AIR) return false;
+  const blockData = BLOCKS[block];
+  if (!blockData) return false;
+  if (blockData.liquid) return false;
+  if (blockData.renderType === 'fence') return true;
+  return blockData.solid && blockData.renderType !== 'cross' && blockData.renderType !== 'plant' && blockData.renderType !== 'torch';
+}
+
+function getBlockCollisionBoxes(x: number, y: number, z: number, block: BlockType): AABB[] {
+  const blockData = BLOCKS[block];
+  if (!blockData || block === BlockType.AIR) return [];
+  const worldStore = useWorldStore.getState();
+  const chunkCoord = worldToChunk(x, z);
+  const chunk = worldStore.getChunk(chunkCoord.x, chunkCoord.z);
+  const local = worldToLocal(x, y, z);
+  const state = chunk ? getBlockStateFromChunk(chunk, local.x, local.y, local.z) : 0;
+
+  if (blockData.renderType === 'slab') {
+    const topHalf = (state & 1) !== 0;
+    return [{
+      minX: x, minY: y + (topHalf ? 0.5 : 0), minZ: z,
+      maxX: x + 1, maxY: y + (topHalf ? 1 : 0.5), maxZ: z + 1,
+    }];
+  }
+
+  if (blockData.renderType === 'stairs') {
+    const facing = state & 3;
+    const topHalf = (state & 4) !== 0;
+    const baseY = topHalf ? 0.5 : 0;
+    const topY = topHalf ? 1 : 0.5;
+    const boxes: AABB[] = [{
+      minX: x, minY: y + baseY, minZ: z,
+      maxX: x + 1, maxY: y + topY, maxZ: z + 1,
+    }];
+
+    switch (facing) {
+      case 1:
+        boxes.push({ minX: x + 0.5, minY: y + baseY, minZ: z, maxX: x + 1, maxY: y + topY, maxZ: z + 1 });
+        break;
+      case 2:
+        boxes.push({ minX: x, minY: y + baseY, minZ: z, maxX: x + 1, maxY: y + topY, maxZ: z + 0.5 });
+        break;
+      case 3:
+        boxes.push({ minX: x, minY: y + baseY, minZ: z, maxX: x + 0.5, maxY: y + topY, maxZ: z + 1 });
+        break;
+      default:
+        boxes.push({ minX: x, minY: y + baseY, minZ: z + 0.5, maxX: x + 0.5, maxY: y + topY, maxZ: z + 1 });
+        break;
+    }
+    return boxes;
+  }
+
+  if (blockData.renderType === 'fence') {
+    const boxes: AABB[] = [
+      {
+        minX: x + 0.375, minY: y, minZ: z + 0.375,
+        maxX: x + 0.625, maxY: y + 1, maxZ: z + 0.625,
+      },
+    ];
+
+    if (canFenceConnectTo(worldStore.getBlock(x, y, z - 1))) {
+      boxes.push({
+        minX: x + 0.4375, minY: y + 0.375, minZ: z,
+        maxX: x + 0.5625, maxY: y + 0.75, maxZ: z + 0.4375,
+      });
+    }
+    if (canFenceConnectTo(worldStore.getBlock(x, y, z + 1))) {
+      boxes.push({
+        minX: x + 0.4375, minY: y + 0.375, minZ: z + 0.5625,
+        maxX: x + 0.5625, maxY: y + 0.75, maxZ: z + 1,
+      });
+    }
+    if (canFenceConnectTo(worldStore.getBlock(x - 1, y, z))) {
+      boxes.push({
+        minX: x, minY: y + 0.375, minZ: z + 0.4375,
+        maxX: x + 0.4375, maxY: y + 0.75, maxZ: z + 0.5625,
+      });
+    }
+    if (canFenceConnectTo(worldStore.getBlock(x + 1, y, z))) {
+      boxes.push({
+        minX: x + 0.5625, minY: y + 0.375, minZ: z + 0.4375,
+        maxX: x + 1, maxY: y + 0.75, maxZ: z + 0.5625,
+      });
+    }
+
+    return boxes;
+  }
+
+  if (blockData.collisionBoxes && blockData.collisionBoxes.length > 0) {
+    return blockData.collisionBoxes.map((box) => ({
+      minX: x + box.x,
+      minY: y + box.y,
+      minZ: z + box.z,
+      maxX: x + box.x + box.width,
+      maxY: y + box.y + box.height,
+      maxZ: z + box.z + box.depth,
+    }));
+  }
+
+  if (blockData.hitbox) {
+    const box = blockData.hitbox;
+    return [{
+      minX: x + box.x,
+      minY: y + box.y,
+      minZ: z + box.z,
+      maxX: x + box.x + box.width,
+      maxY: y + box.y + box.height,
+      maxZ: z + box.z + box.depth,
+    }];
+  }
+
+  if (blockData.solid) {
+    return [{
+      minX: x, minY: y, minZ: z,
+      maxX: x + 1, maxY: y + 1, maxZ: z + 1,
+    }];
+  }
+
+  return [];
 }
 
 export function applyPhysics(
@@ -153,75 +276,32 @@ export function isValidPosition(x: number, y: number, z: number): boolean {
 
 // ✅ FIXED: Find the highest Y that has solid ground with no liquid above it
 export function findSpawnPosition(x: number, z: number): number {
-  const worldStore = useWorldStore.getState();
-  const fx = Math.floor(x);
-  const fz = Math.floor(z);
+  const resolved = resolveSpawnLocation({
+    originX: x,
+    originZ: z,
+    searchRadius: 0,
+    requireLoadedChunks: false,
+    allowFallback: false,
+  });
 
-  for (let y = 255; y >= 1; y--) {
-    const block = worldStore.getBlock(fx, y, fz);
-
-    // Must be solid and not a liquid itself
-    if (!isSolid(block) || isLiquid(block)) continue;
-
-    // Check the two blocks above where the player would stand — both must be non-solid and non-liquid
-    const above1 = worldStore.getBlock(fx, y + 1, fz);
-    const above2 = worldStore.getBlock(fx, y + 2, fz);
-
-    if (isLiquid(above1) || isLiquid(above2)) continue; // underwater surface — skip
-    if (isSolid(above1) || isSolid(above2)) continue;   // not enough headroom — skip
-
-    return y + 1; // Stand on top of this block
-  }
-
-  return 64;
+  return resolved ? resolved.position.y : 64;
 }
 
-// ✅ FIXED: Search radius for a guaranteed dry land spawn
+// Search radius for a guaranteed dry land spawn
 export function findSafeSpawnPosition(
   x: number,
   z: number,
-  searchRadius: number = 64  // Increased search radius for better surface finding
+  searchRadius: number = 64,
+  requireLoadedChunks: boolean = false
 ): { x: number; y: number; z: number } {
-  // Try the exact position first
-  const spawnY = findSpawnPosition(x, z);
-  if (isSpawnDry(Math.floor(x), spawnY, Math.floor(z))) {
-    return { x: Math.floor(x) + 0.5, y: spawnY, z: Math.floor(z) + 0.5 };
-  }
+  const resolved = resolveSpawnLocation({
+    originX: x,
+    originZ: z,
+    searchRadius,
+    requireLoadedChunks,
+    allowFallback: true,
+    fallbackY: 180,
+  });
 
-  // Spiral outward to find dry land
-  for (let r = 1; r <= searchRadius; r++) {
-    for (let dx = -r; dx <= r; dx++) {
-      for (let dz = -r; dz <= r; dz++) {
-        if (Math.abs(dx) !== r && Math.abs(dz) !== r) continue; // Only check ring edge
-        const checkX = Math.floor(x) + dx;
-        const checkZ = Math.floor(z) + dz;
-        const checkY = findSpawnPosition(checkX, checkZ);
-        if (isSpawnDry(checkX, checkY, checkZ)) {
-          return { x: checkX + 0.5, y: checkY, z: checkZ + 0.5 };
-        }
-      }
-    }
-  }
-
-  // Last resort: use the original position but ensure it's on solid ground
-  console.warn('No suitable ground spawn found, using original position with ground check');
-  const fallbackY = findSpawnPosition(x, z);
-  return { x: Math.floor(x) + 0.5, y: fallbackY, z: Math.floor(z) + 0.5 };
-}
-
-// Helper: checks that a spawn column is fully dry (no liquid at feet, body, or ground)
-function isSpawnDry(x: number, y: number, z: number): boolean {
-  const worldStore = useWorldStore.getState();
-  const ground  = worldStore.getBlock(x, y - 1, z);
-  const feet    = worldStore.getBlock(x, y,     z);
-  const body    = worldStore.getBlock(x, y + 1, z);
-
-  return (
-    isSolid(ground) &&
-    !isLiquid(ground) &&
-    !isLiquid(feet) &&
-    !isLiquid(body) &&
-    !isSolid(feet) &&   // spawn space must be clear
-    !isSolid(body)
-  );
+  return resolved?.position ?? { x: Math.floor(x) + 0.5, y: 180, z: Math.floor(z) + 0.5 };
 }

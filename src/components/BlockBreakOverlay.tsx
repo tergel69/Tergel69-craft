@@ -218,12 +218,14 @@ function BlockBreakParticles() {
 }
 
 function spawnParticles(breaking: any, color: THREE.Color, particles: Particle[]) {
-  const { x, y, z, nx, ny, nz } = breaking;
+  const { x, y, z, nx, ny, nz, progress } = breaking;
   const center = new THREE.Vector3(x + 0.5, y + 0.5, z + 0.5);
   const normal = new THREE.Vector3(nx, ny, nz);
   
-  // Spawn particles in a burst from the block face
-  for (let i = 0; i < 8; i++) {
+  // Spawn more particles as breaking progresses
+  const particleCount = Math.floor(8 + progress * 20);
+  
+  for (let i = 0; i < particleCount; i++) {
     const p = getParticle(particles);
     if (!p) break;
 
@@ -240,16 +242,25 @@ function spawnParticles(breaking: any, color: THREE.Color, particles: Particle[]
     
     p.position.copy(center).add(pos);
     
-    // Velocity away from face with some randomness
-    const velocity = normal.clone().multiplyScalar(0.02 + Math.random() * 0.03);
-    velocity.x += (Math.random() - 0.5) * 0.02;
-    velocity.y += (Math.random() - 0.5) * 0.02;
-    velocity.z += (Math.random() - 0.5) * 0.02;
+    // Velocity away from face with more intensity based on progress
+    const intensity = 0.02 + progress * 0.04;
+    const velocity = normal.clone().multiplyScalar(intensity + Math.random() * 0.03);
+    velocity.x += (Math.random() - 0.5) * 0.02 * (1 + progress);
+    velocity.y += (Math.random() - 0.5) * 0.02 * (1 + progress);
+    velocity.z += (Math.random() - 0.5) * 0.02 * (1 + progress);
     p.velocity.copy(velocity);
     
-    p.life = p.maxLife = 60 + Math.floor(Math.random() * 40);
-    p.color.copy(color);
-    p.size = 0.1 + Math.random() * 0.1;
+    // Longer life for higher progress
+    p.life = p.maxLife = 60 + Math.floor(Math.random() * 40) + Math.floor(progress * 30);
+    
+    // Color shifts from block color to red as progress increases
+    const colorMix = progress;
+    p.color.setRGB(
+      color.r * (1 - colorMix * 0.5) + 0.8 * colorMix,
+      color.g * (1 - colorMix * 0.3),
+      color.b * (1 - colorMix)
+    );
+    p.size = 0.1 + Math.random() * 0.1 + progress * 0.05;
   }
 }
 

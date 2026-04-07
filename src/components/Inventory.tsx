@@ -10,7 +10,8 @@ import { useInventoryStore, getItemName, getItemColor, InventorySlot } from '@/s
 import { useGameStore } from '@/stores/gameStore';
 import { BlockType, BLOCKS } from '@/data/blocks';
 import { ItemType, ITEMS } from '@/data/items';
-import { findRecipeMatch } from '@/data/recipes';
+import { discoverRecipe, findRecipeMatch } from '@/data/recipes';
+import { itemTextureGenerator } from '@/data/itemTextures';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const SLOT_SIZE = 48; // px
@@ -24,21 +25,28 @@ function getSlotBg(item: BlockType | ItemType | null): string {
 }
 
 function ItemIcon({ item, count, size = 36 }: { item: BlockType | ItemType; count: number; size?: number }) {
-  const color = getItemColor(item);
   const name = getItemName(item);
+  const src = itemTextureGenerator.getItemImageSrc(item);
   return (
     <div className="relative w-full h-full flex items-center justify-center">
       <div
         style={{
           width: size, height: size,
-          background: `linear-gradient(135deg, ${lighten(color, 20)} 0%, ${color} 60%, ${darken(color, 20)} 100%)`,
           boxShadow: 'inset 2px 2px 0 rgba(255,255,255,0.35), inset -2px -2px 0 rgba(0,0,0,0.35)',
           imageRendering: 'pixelated',
           borderRadius: 2,
           flexShrink: 0,
+          overflow: 'hidden',
         }}
         title={name}
-      />
+      >
+        <img
+          src={src}
+          alt={name}
+          className="w-full h-full object-cover"
+          style={{ imageRendering: 'pixelated' }}
+        />
+      </div>
       {count > 1 && (
         <span
           className="absolute bottom-0.5 right-0.5 text-white font-bold select-none pointer-events-none"
@@ -78,19 +86,34 @@ interface SlotProps {
 function Slot({ slot, onClick, label, highlight, dim }: SlotProps) {
   const [hovered, setHovered] = useState(false);
   const name = slot.item !== null ? getItemName(slot.item) : label;
-
+  const isEnchanted = false; // Could check for enchanted items via metadata
+  
   return (
     <div className="relative group" style={{ width: SLOT_SIZE, height: SLOT_SIZE }}>
+      {/* Slot glow effect for enchanted items */}
+      {isEnchanted && (
+        <div className="absolute inset-0 rounded animate-pulse" style={{
+          background: 'linear-gradient(135deg, rgba(180,100,255,0.4) 0%, transparent 50%, rgba(180,100,255,0.4) 100%)',
+          filter: 'blur(4px)',
+          animation: 'enchantPulse 2s ease-in-out infinite'
+        }} />
+      )}
       <button
         style={{
           width: SLOT_SIZE, height: SLOT_SIZE,
-          background: hovered ? '#3a3a3a' : '#1e1e1e',
-          border: `2px solid ${highlight ? '#f0b429' : hovered ? '#888' : '#555'}`,
-          boxShadow: highlight ? '0 0 6px #f0b429' : 'inset 1px 1px 0 #333, inset -1px -1px 0 #111',
+          background: hovered 
+            ? 'linear-gradient(145deg, #404040 0%, #2a2a2a 100%)'
+            : 'linear-gradient(145deg, #252525 0%, #1a1a1a 100%)',
+          border: `2px solid ${highlight ? '#f0b429' : hovered ? '#999' : '#404040'}`,
+          boxShadow: highlight 
+            ? '0 0 8px #f0b429, inset 1px 1px 0 #444, inset -1px -1px 0 #111'
+            : hovered 
+              ? 'inset 2px 2px 3px rgba(255,255,255,0.1), inset -1px -1px 2px rgba(0,0,0,0.3)'
+              : 'inset 1px 1px 0 #333, inset -1px -1px 0 #111',
           position: 'relative',
           cursor: 'pointer',
           opacity: dim ? 0.45 : 1,
-          transition: 'border-color 0.1s, background 0.1s',
+          transition: 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)',
           borderRadius: 3,
         }}
         onClick={onClick}
@@ -98,9 +121,29 @@ function Slot({ slot, onClick, label, highlight, dim }: SlotProps) {
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
+        {/* Inner highlight */}
+        <div style={{
+          position: 'absolute', inset: 2,
+          background: hovered 
+            ? 'linear-gradient(145deg, rgba(255,255,255,0.08) 0%, transparent 50%)'
+            : 'linear-gradient(145deg, rgba(255,255,255,0.03) 0%, transparent 40%)',
+          borderRadius: 1,
+          pointerEvents: 'none'
+        }} />
         {slot.item !== null && <ItemIcon item={slot.item} count={slot.count} size={32} />}
         {slot.item === null && label && (
-          <span style={{ color: '#444', fontSize: 9, position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+          <span style={{ 
+            color: '#3a3a3a', 
+            fontSize: 9, 
+            position: 'absolute', 
+            inset: 0, 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            pointerEvents: 'none',
+            fontFamily: 'monospace',
+            letterSpacing: '0.5px'
+          }}>
             {label}
           </span>
         )}
@@ -112,23 +155,43 @@ function Slot({ slot, onClick, label, highlight, dim }: SlotProps) {
           const barColor = pct > 0.6 ? '#55ff55' : pct > 0.3 ? '#ffaa00' : '#ff3333';
           return (
             <div style={{
-              position: 'absolute', bottom: 2, left: 2, right: 2, height: 2,
-              background: '#222', borderRadius: 1,
+              position: 'absolute', bottom: 3, left: 3, right: 3, height: 3,
+              background: '#1a1a1a', borderRadius: 1,
+              overflow: 'hidden',
             }}>
-              <div style={{ width: `${pct * 100}%`, height: '100%', background: barColor, borderRadius: 1 }} />
+              <div style={{ 
+                width: `${pct * 100}%`, 
+                height: '100%', 
+                background: `linear-gradient(90deg, ${barColor} 0%, ${barColor}dd 100%)`, 
+                borderRadius: 1,
+                boxShadow: `0 0 4px ${barColor}80`
+              }} />
             </div>
           );
         })()}
       </button>
-      {/* Tooltip */}
+      {/* Enhanced Tooltip */}
       {hovered && name && (
         <div style={{
-          position: 'absolute', bottom: '110%', left: '50%', transform: 'translateX(-50%)',
-          background: 'rgba(0,0,0,0.92)', color: '#fff', fontSize: 11, padding: '4px 8px',
-          borderRadius: 3, whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: 200,
-          border: '1px solid #555',
+          position: 'absolute', bottom: '115%', left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(24, 20, 16, 0.95)', 
+          color: '#f0f0f0', 
+          fontSize: 12, 
+          padding: '6px 10px',
+          borderRadius: 4, 
+          whiteSpace: 'nowrap', 
+          pointerEvents: 'none', 
+          zIndex: 200,
+          border: '1px solid #3a352a',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+          fontFamily: 'MinecraftFont, monospace',
         }}>
-          {name}
+          <span style={{ 
+            color: '#f0f0f0',
+            textShadow: '1px 1px 0 #000'
+          }}>
+            {name}
+          </span>
         </div>
       )}
     </div>
@@ -158,6 +221,7 @@ export default function Inventory() {
     [false, false],
     [false, false],
   ]);
+  const [matchedRecipeId, setMatchedRecipeId] = useState<string | null>(null);
 
   const [mouse, setMouse] = useState({ x: 0, y: 0 });
   useEffect(() => {
@@ -176,12 +240,14 @@ export default function Inventory() {
     if (match) {
       setCraftingResult({ item: match.recipe.result.item, count: match.recipe.result.count });
       setConsumeMask(match.consumeMask);
+      setMatchedRecipeId(match.recipe.id);
     } else {
       setCraftingResult({ item: null, count: 0 });
       setConsumeMask([
         [false, false],
         [false, false],
       ]);
+      setMatchedRecipeId(null);
     }
   }, [craftingGrid, setCraftingResult]);
 
@@ -194,6 +260,11 @@ export default function Inventory() {
     } else if (held.item === craftingResult.item && held.count + craftingResult.count <= 64) {
       useInventoryStore.setState({ heldItem: { ...held, count: held.count + craftingResult.count } });
     } else return;
+
+    if (matchedRecipeId) {
+      discoverRecipe(matchedRecipeId);
+    }
+
     const newGrid = craftingGrid.map((slot, idx) => {
       const gy = Math.floor(idx / 2);
       const gx = idx % 2;
@@ -202,7 +273,7 @@ export default function Inventory() {
       return { ...slot, count: nextCount, item: nextCount > 0 ? slot.item : null };
     });
     setCraftingGrid(newGrid);
-  }, [craftingResult, craftingGrid, consumeMask, setCraftingGrid]);
+  }, [craftingResult, craftingGrid, consumeMask, matchedRecipeId, setCraftingGrid]);
 
   const handleSlotClick = useCallback((idx: number, isHotbar: boolean, e: React.MouseEvent) => {
     const right = e.button === 2;

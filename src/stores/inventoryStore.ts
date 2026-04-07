@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { BlockType, BLOCKS } from '@/data/blocks';
 import { ItemType, ITEMS, ItemData } from '@/data/items';
+import { getEnchantmentLevel } from '@/data/enchantments';
 import { HOTBAR_SLOTS, INVENTORY_ROWS, INVENTORY_COLS } from '@/utils/constants';
 import { usePlayerStore } from '@/stores/playerStore';
 
@@ -8,6 +9,7 @@ export interface InventorySlot {
   item: BlockType | ItemType | null;
   count: number;
   durability?: number;
+  enchantments?: Record<string, number>;
 }
 
 interface InventoryStore {
@@ -42,6 +44,7 @@ interface InventoryStore {
   pickupItem: (index: number, half?: boolean) => void;
   placeItem: (index: number, single?: boolean) => void;
   dropHeldItem: () => InventorySlot | null;
+  setHeldItem: (slot: InventorySlot) => void;
   setCraftingGrid: (grid: InventorySlot[]) => void;
   setCraftingResult: (result: InventorySlot) => void;
   clearCraftingGrid: () => void;
@@ -332,6 +335,10 @@ export const useInventoryStore = create<InventoryStore>((set, get) => ({
     return dropped;
   },
 
+  setHeldItem: (slot) => {
+    set({ heldItem: slot });
+  },
+
   setCraftingGrid: (grid) => {
     set({ craftingGrid: grid });
   },
@@ -389,7 +396,20 @@ export const useInventoryStore = create<InventoryStore>((set, get) => ({
     const item = get().getHotbarSlot(slot);
     if (!item.item || item.durability === undefined) return true;
 
-    const newDurability = item.durability - amount;
+    const unbreaking = getEnchantmentLevel(item, 'unbreaking');
+    let damage = 0;
+    for (let i = 0; i < amount; i++) {
+      if (unbreaking > 0) {
+        const chanceToLoseDurability = 1 / (unbreaking + 1);
+        if (Math.random() <= chanceToLoseDurability) damage += 1;
+      } else {
+        damage += 1;
+      }
+    }
+
+    if (damage <= 0) return true;
+
+    const newDurability = item.durability - damage;
     if (newDurability <= 0) {
       // Item broke
       get().setHotbarSlot(slot, createEmptySlot());

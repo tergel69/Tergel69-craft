@@ -1,4 +1,4 @@
-import { useWorldStore, ChunkData } from '@/stores/worldStore';
+import { useWorldStore, ChunkData, BlockEntityData } from '@/stores/worldStore';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useInventoryStore, InventorySlot } from '@/stores/inventoryStore';
 import { useGameStore } from '@/stores/gameStore';
@@ -14,6 +14,7 @@ export interface WorldSaveData {
   version: number;
   name: string;
   seed: number;
+  generationMode?: 'classic' | 'new_generation';
   createdAt: number;
   lastPlayed: number;
   gameMode: 'survival' | 'creative' | 'spectator';
@@ -46,7 +47,7 @@ export interface InventorySaveData {
 export interface ChunkSaveData {
   x: number;
   z: number;
-  modifications: Record<number, BlockType>; // Only save player modifications
+  modifications: Record<number, number>; // Packed block + state data
 }
 
 export interface FullSaveData {
@@ -54,6 +55,7 @@ export interface FullSaveData {
   player: PlayerSaveData;
   inventory: InventorySaveData;
   chunks: ChunkSaveData[];
+  blockEntities?: Array<{ key: string; data: BlockEntityData }>;
 }
 
 // Get list of saved worlds
@@ -109,6 +111,7 @@ export function saveGame(): boolean {
       version: CURRENT_VERSION,
       name: gameStore.worldName,
       seed: gameStore.worldSeed,
+      generationMode: gameStore.worldGenerationMode,
       createdAt: Date.now(), // Should be stored initially
       lastPlayed: Date.now(),
       gameMode: gameStore.gameMode,
@@ -156,6 +159,7 @@ export function saveGame(): boolean {
       player: playerData,
       inventory: inventoryData,
       chunks: chunksData,
+      blockEntities: Array.from(worldStore.blockEntities.entries()).map(([key, data]) => ({ key, data })),
     };
 
     // Save to localStorage
@@ -210,6 +214,8 @@ export function applySaveData(saveData: FullSaveData): void {
   // Apply game state
   gameStore.setWorldInfo(saveData.world.name, saveData.world.seed);
   gameStore.setGameMode(saveData.world.gameMode);
+  gameStore.setWorldGenerationMode(saveData.world.generationMode ?? 'classic');
+  gameStore.setWorldInitMode('loaded');
   gameStore.setWorldTime(saveData.world.worldTime);
 
   // Apply player state
@@ -229,9 +235,18 @@ export function applySaveData(saveData: FullSaveData): void {
   for (const chunkSave of saveData.chunks) {
     const key = chunkKey(chunkSave.x, chunkSave.z);
     const modifications = new Map(Object.entries(chunkSave.modifications).map(
-      ([k, v]) => [parseInt(k), v as BlockType]
+      ([k, v]) => [parseInt(k), v]
     ));
     worldStore.modifications.set(key, modifications);
+  }
+
+  if (saveData.blockEntities) {
+    for (const { key, data } of saveData.blockEntities) {
+      const [x, y, z] = key.split(',').map(Number);
+      if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+        worldStore.setBlockEntity(x, y, z, data);
+      }
+    }
   }
 }
 

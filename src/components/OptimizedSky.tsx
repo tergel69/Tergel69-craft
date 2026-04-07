@@ -13,19 +13,22 @@ type SkyPalette = {
 };
 
 const PALETTES: SkyPalette[] = [
-  { top: new THREE.Color(0x0a1025), bottom: new THREE.Color(0x151a36), fog: new THREE.Color(0x11162f) }, // midnight
-  { top: new THREE.Color(0x385a9c), bottom: new THREE.Color(0xffa86a), fog: new THREE.Color(0xdd9860) }, // sunrise
-  { top: new THREE.Color(0x7fc8ff), bottom: new THREE.Color(0xd8efff), fog: new THREE.Color(0x9dcef7) }, // day
-  { top: new THREE.Color(0x2e4c8d), bottom: new THREE.Color(0xff8756), fog: new THREE.Color(0xd27b53) }, // sunset
-  { top: new THREE.Color(0x0a1025), bottom: new THREE.Color(0x151a36), fog: new THREE.Color(0x11162f) }, // night
+  { top: new THREE.Color(0x87ceeb), bottom: new THREE.Color(0xe0f0ff), fog: new THREE.Color(0x88ccee) }, // day (index 0)
+  { top: new THREE.Color(0x6090d0), bottom: new THREE.Color(0xffaa66), fog: new THREE.Color(0x776644) }, // sunrise (index 1)
+  { top: new THREE.Color(0x3050a0), bottom: new THREE.Color(0xff8855), fog: new THREE.Color(0x553322) }, // pre-dawn (index 2)
+  { top: new THREE.Color(0x1a1a2e), bottom: new THREE.Color(0x4a4a5a), fog: new THREE.Color(0x252535) }, // midnight (index 3)
 ];
 
 function samplePalette(t: number): SkyPalette {
-  const phase = (t % 1) * 4;
-  const i = Math.floor(phase);
-  const localT = phase - i;
+  // Normalize t to 0-1 range based on day cycle
+  const normalizedT = t / DAY_LENGTH;
+  const phase = normalizedT * 4; // 0-4 for 4 phases
+  const i = Math.floor(phase) % 4; 
+  const nextI = (i + 1) % 4;
+  const localT = phase - Math.floor(phase);
+  
   const a = PALETTES[i];
-  const b = PALETTES[i + 1];
+  const b = PALETTES[nextI];
   return {
     top: a.top.clone().lerp(b.top, localT),
     bottom: a.bottom.clone().lerp(b.bottom, localT),
@@ -60,11 +63,23 @@ export default function OptimizedSky() {
   const sunMaterial = useMemo(
     () =>
       new THREE.MeshStandardMaterial({
-        color: 0xffeb9c,
-        emissive: new THREE.Color(0xffd348),
-        emissiveIntensity: 1.8,
-        roughness: 0.2,
-        metalness: 0,
+        color: 0xfff4d0,
+        emissive: new THREE.Color(0xffaa33),
+        emissiveIntensity: 2.2,
+        roughness: 0.15,
+        metalness: 0.1,
+      }),
+    []
+  );
+
+  const sunFlareMaterial = useMemo(
+    () =>
+      new THREE.MeshBasicMaterial({
+        color: 0xffdd55,
+        transparent: true,
+        opacity: 0.35,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
       }),
     []
   );
@@ -72,47 +87,64 @@ export default function OptimizedSky() {
   const moonMaterial = useMemo(
     () =>
       new THREE.MeshStandardMaterial({
-        color: 0xd9e3ff,
-        emissive: new THREE.Color(0x89a6ff),
-        emissiveIntensity: 0.45,
-        roughness: 0.8,
+        color: 0xe8f0ff,
+        emissive: new THREE.Color(0x6688dd),
+        emissiveIntensity: 0.55,
+        roughness: 0.7,
         metalness: 0,
+      }),
+    []
+  );
+  
+  const moonFlareMaterial = useMemo(
+    () =>
+      new THREE.MeshBasicMaterial({
+        color: 0x8899ff,
+        transparent: true,
+        opacity: 0.2,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
       }),
     []
   );
 
   const stars = useMemo(() => {
-    const positions = new Float32Array(1300 * 3);
-    for (let i = 0; i < 1300; i++) {
+    const positions = new Float32Array(1500 * 3);
+    const sizes = new Float32Array(1500);
+    for (let i = 0; i < 1500; i++) {
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
-      const radius = 470;
+      const radius = 450 + Math.random() * 30;
       positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
       positions[i * 3 + 1] = radius * Math.cos(phi);
       positions[i * 3 + 2] = radius * Math.sin(phi) * Math.sin(theta);
+      sizes[i] = 0.5 + Math.random() * 2.0; // Varied star sizes
     }
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
     const material = new THREE.PointsMaterial({
-      size: 1.8,
-      color: 0xffffff,
+      size: 2.0,
+      color: 0xffffee,
       transparent: true,
       opacity: 0,
       depthWrite: false,
-      sizeAttenuation: false,
+      sizeAttenuation: true,
       fog: false,
+      blending: THREE.AdditiveBlending,
     });
     return { geometry, material };
   }, []);
 
   const cloudSprites = useMemo(() => {
-    const items: { x: number; y: number; z: number; scale: number }[] = [];
-    for (let i = 0; i < 20; i++) {
+    const items: { x: number; y: number; z: number; scale: number; opacity: number }[] = [];
+    for (let i = 0; i < 25; i++) {
       items.push({
-        x: (Math.random() - 0.5) * 800,
-        y: 95 + Math.random() * 35,
-        z: (Math.random() - 0.5) * 800,
-        scale: 16 + Math.random() * 20,
+        x: (Math.random() - 0.5) * 700,
+        y: 90 + Math.random() * 40,
+        z: (Math.random() - 0.5) * 700,
+        scale: 18 + Math.random() * 24,
+        opacity: 0.12 + Math.random() * 0.15,
       });
     }
     return items;
@@ -205,10 +237,11 @@ export default function OptimizedSky() {
           <mesh key={i} position={[cloud.x, cloud.y, cloud.z]} rotation={[-Math.PI / 2, 0, 0]}>
             <planeGeometry args={[cloud.scale * 1.8, cloud.scale]} />
             <meshBasicMaterial
-              color={0xffffff}
+              color={0xfafafa}
               transparent
-              opacity={0.22}
+              opacity={cloud.opacity}
               depthWrite={false}
+              fog={false}
             />
           </mesh>
         ))}
@@ -219,16 +252,16 @@ export default function OptimizedSky() {
         <primitive object={sunMaterial} attach="material" />
       </mesh>
       <mesh ref={sunHaloRef} renderOrder={-1610}>
-        <planeGeometry args={[58, 58]} />
-        <meshBasicMaterial color={0xffd56b} transparent opacity={0.22} depthWrite={false} />
+        <planeGeometry args={[65, 65]} />
+        <primitive object={sunFlareMaterial} attach="material" />
       </mesh>
       <mesh ref={moonRef} renderOrder={-1600}>
         <sphereGeometry args={[12, 14, 14]} />
         <primitive object={moonMaterial} attach="material" />
       </mesh>
       <mesh ref={moonHaloRef} renderOrder={-1610}>
-        <planeGeometry args={[42, 42]} />
-        <meshBasicMaterial color={0xa9c4ff} transparent opacity={0.16} depthWrite={false} />
+        <planeGeometry args={[48, 48]} />
+        <primitive object={moonFlareMaterial} attach="material" />
       </mesh>
 
       <directionalLight ref={sunDirRef} color={0xfff7da} castShadow={false} />

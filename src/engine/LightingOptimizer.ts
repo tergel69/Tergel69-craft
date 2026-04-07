@@ -32,8 +32,9 @@ export class LightingOptimizer {
     const chunk = this.worldStore.getChunk(chunkX, chunkZ);
     if (!chunk || !chunk.isGenerated) return;
 
-    // Initialize light arrays
-    chunk.lightMap = new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE).fill(0);
+    // Initialize light arrays with a bright default so touched chunks never
+    // briefly collapse to black while lighting propagates.
+    chunk.lightMap = new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE).fill(SKY_LIGHT_SOURCE);
 
     // Set sky light for surface blocks
     for (let z = 0; z < CHUNK_SIZE; z++) {
@@ -73,12 +74,6 @@ export class LightingOptimizer {
     const chunkCoord = worldToChunk(x, z);
     const chunk = this.worldStore.getChunk(chunkCoord.x, chunkCoord.z);
     if (!chunk) return;
-
-    const local = worldToLocal(x, y, z);
-    const index = this.getLightIndex(local.x, local.y, local.z);
-
-    // Clear existing light
-    chunk.lightMap[index] = 0;
 
     // Add to processing queue
     this.addToQueue(x, y, z, 0, 0);
@@ -170,37 +165,7 @@ export class LightingOptimizer {
   private getBlockLightLevel(x: number, y: number, z: number): number {
     const block = this.worldStore.getBlock(x, y, z);
     const blockData = BLOCKS[block];
-    
-    if (blockData && blockData.lightLevel) {
-      return blockData.lightLevel;
-    }
-
-    // Check if there's a light-emitting block nearby
-    let maxLight = 0;
-    const searchRadius = 15; // Light emission radius
-
-    for (let dy = -searchRadius; dy <= searchRadius; dy++) {
-      for (let dz = -searchRadius; dz <= searchRadius; dz++) {
-        for (let dx = -searchRadius; dx <= searchRadius; dx++) {
-          const nx = x + dx;
-          const ny = y + dy;
-          const nz = z + dz;
-          
-          if (this.isValidPosition(nx, ny, nz)) {
-            const neighborBlock = this.worldStore.getBlock(nx, ny, nz);
-            const neighborData = BLOCKS[neighborBlock];
-            
-            if (neighborData && neighborData.lightLevel) {
-              const distance = Math.abs(dx) + Math.abs(dy) + Math.abs(dz);
-              const light = Math.max(0, neighborData.lightLevel - distance);
-              maxLight = Math.max(maxLight, light);
-            }
-          }
-        }
-      }
-    }
-
-    return maxLight;
+    return blockData?.lightLevel ?? 0;
   }
 
   private getSkyLightLevel(x: number, y: number, z: number): number {
@@ -266,7 +231,7 @@ export class LightingOptimizer {
   clearChunkLighting(chunkX: number, chunkZ: number): void {
     const chunk = this.worldStore.getChunk(chunkX, chunkZ);
     if (chunk) {
-      chunk.lightMap = new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE).fill(0);
+      chunk.lightMap = new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE).fill(SKY_LIGHT_SOURCE);
     }
   }
 

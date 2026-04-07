@@ -21,6 +21,7 @@ export enum BiomeType {
   DARK_FOREST = 'dark_forest',
   FLOWER_FOREST = 'flower_forest',
   CHERRY_GROVE = 'cherry_grove',
+  ORANGE_GROVE = 'orange_grove',
   MEADOW = 'meadow',
   DEEP_OCEAN = 'deep_ocean',
   FROZEN_OCEAN = 'frozen_ocean',
@@ -499,6 +500,29 @@ export const BIOMES: Record<BiomeType, BiomeData> = {
     grassColor: '#B6DB61',
     specialFeatures: ['cherry_petals', 'bees'],
   },
+  [BiomeType.ORANGE_GROVE]: {
+    id: BiomeType.ORANGE_GROVE,
+    name: 'Orange Grove',
+    temperature: [0.6, 0.75],
+    humidity: [0.4, 0.55],
+    baseHeight: 65,
+    heightVariation: 10,
+    surfaceBlock: BlockType.GRASS,
+    subsurfaceBlock: BlockType.DIRT,
+    underwaterBlock: BlockType.DIRT,
+    treeType: BlockType.ORANGE_LOG,
+    leavesType: BlockType.ORANGE_LEAVES,
+    treeDensity: 0.15,
+    grassDensity: 0.35,
+    flowerDensity: 0.1,
+    hasSnow: false,
+    waterColor: '#5DB7EF',
+    skyColor: '#87CEEB',
+    fogColor: '#C9E8FF',
+    foliageColor: '#FF9F3A',
+    grassColor: '#8BC34A',
+    specialFeatures: ['orange_trees'],
+  },
   [BiomeType.MEADOW]: {
     id: BiomeType.MEADOW,
     name: 'Meadow',
@@ -787,6 +811,8 @@ export function getBiome(temperature: number, humidity: number, height: number):
       return BiomeType.FOREST;
     } else if (humidity > 0.4) {
       return BiomeType.CHERRY_GROVE;
+    } else if (humidity > 0.25 && humidity < 0.55 && temperature > 0.55 && temperature < 0.75) {
+      return BiomeType.ORANGE_GROVE;
     }
     return BiomeType.PLAINS;
   } else {

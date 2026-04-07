@@ -2,8 +2,11 @@ import * as THREE from 'three';
 import { BlockType, BLOCKS, isTransparent } from '@/data/blocks';
 import { CHUNK_SIZE, CHUNK_HEIGHT } from '@/utils/constants';
 import { ChunkData, getBlockFromChunk } from '@/stores/worldStore';
+import { decodeTerrainBiome } from '@/utils/biomeEncoding';
+import { BiomeType as VisualBiomeType, getBiomeData } from '@/data/biomes';
 import { simpleBlockColorSystem } from '@/data/simpleBlockColors';
 import { textureManager } from '@/data/textureManager';
+import { BiomeType as TerrainBiomeType } from './TerrainGenerator';
 
 type Face = 'TOP' | 'BOTTOM' | 'NORTH' | 'SOUTH' | 'EAST' | 'WEST';
 
@@ -13,6 +16,27 @@ interface NeighborChunks {
   south?: ChunkData;
   east?: ChunkData;
   west?: ChunkData;
+}
+
+const biomeWaterColorCache = new Map<VisualBiomeType, THREE.Color>();
+
+function getVisualBiomeType(encodedBiome: number): VisualBiomeType {
+  const terrainBiome = decodeTerrainBiome(encodedBiome);
+  switch (terrainBiome) {
+    case TerrainBiomeType.SUNFLOWER_PLAINS:
+      return VisualBiomeType.PLAINS;
+    case TerrainBiomeType.BADLANDS:
+    case TerrainBiomeType.VOLCANIC:
+      return VisualBiomeType.MESA;
+    case TerrainBiomeType.SNOW:
+      return VisualBiomeType.SNOWY_PLAINS;
+    case TerrainBiomeType.MUSHROOM:
+      return VisualBiomeType.MUSHROOM_ISLAND;
+    case TerrainBiomeType.MEGA_MOUNTAINS:
+      return VisualBiomeType.MOUNTAINS;
+    default:
+      return terrainBiome as unknown as VisualBiomeType;
+  }
 }
 
 // Corrected face vertices with proper counter-clockwise winding for front faces
@@ -226,6 +250,7 @@ export function buildWaterMesh(
   const positions: number[] = [];
   const normals: number[] = [];
   const uvs: number[] = [];
+  const colors: number[] = [];
   const indices: number[] = [];
   let vertexCount = 0;
 
@@ -234,6 +259,17 @@ export function buildWaterMesh(
       for (let x = 0; x < CHUNK_SIZE; x++) {
         const block = getBlockFromChunk(chunk, x, y, z);
         if (block !== BlockType.WATER && block !== BlockType.LAVA) continue;
+        const columnIndex = z * CHUNK_SIZE + x;
+        const biomeIndex = chunk.biomes[columnIndex] ?? 0;
+        const visualBiome = getVisualBiomeType(biomeIndex);
+        const biome = getBiomeData(visualBiome);
+        const waterTint = block === BlockType.LAVA
+          ? new THREE.Color('#D96415')
+          : biomeWaterColorCache.get(visualBiome) || (() => {
+              const color = new THREE.Color(biome.waterColor);
+              biomeWaterColorCache.set(visualBiome, color);
+              return color;
+            })();
 
         const faces: { face: Face; dx: number; dy: number; dz: number }[] = [
           { face: 'TOP', dx: 0, dy: 1, dz: 0 },
@@ -263,6 +299,7 @@ export function buildWaterMesh(
             positions.push(x + vx, y + vy + yOffset, z + vz);
             normals.push(faceNormals[0], faceNormals[1], faceNormals[2]);
             uvs.push(FACE_UVS[i][0], FACE_UVS[i][1]);
+            colors.push(waterTint.r, waterTint.g, waterTint.b);
           }
 
           indices.push(
@@ -281,6 +318,7 @@ export function buildWaterMesh(
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   geometry.setIndex(indices);
 
   geometry.computeBoundingSphere();
@@ -299,6 +337,7 @@ export function createBlockMaterial(): THREE.MeshLambertMaterial {
 export function createWaterMaterial(): THREE.MeshLambertMaterial {
   return new THREE.MeshLambertMaterial({
     color: 0x3F76E4,
+    vertexColors: true,
     transparent: true,
     opacity: 0.15, // Almost completely transparent
     side: THREE.DoubleSide,

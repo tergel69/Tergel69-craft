@@ -2,11 +2,13 @@ import { Entity } from './Entity';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useWorldStore } from '@/stores/worldStore';
 import { BlockType, isSolid } from '@/data/blocks';
+import { ItemType } from '@/data/items';
+import { useDroppedItemStore } from '@/components/DroppedItems';
 
 export type MobType = 'passive' | 'hostile' | 'neutral';
 
 export interface MobDrop {
-  item: string | number;
+  item: BlockType | ItemType;
   count: [number, number]; // [min, max]
   chance: number;
 }
@@ -109,38 +111,93 @@ export abstract class Mob extends Entity {
 
   protected updatePassiveAI(delta: number): void {
     const player = usePlayerStore.getState().position;
+    const playerVelocity = usePlayerStore.getState().velocity;
     const distanceToPlayer = this.distanceTo(player.x, player.y, player.z);
-
-    // Passive mobs flee if the player is very close and moving fast.
-    if (distanceToPlayer < 3.5) {
+    
+    // Calculate player speed to determine if we should flee
+    const playerSpeed = Math.sqrt(playerVelocity.x * playerVelocity.x + playerVelocity.z * playerVelocity.z);
+    const isPlayerRunning = playerSpeed > 0.15;
+    
+    // Flee behavior - enhanced with better escape logic
+    const fleeDistance = isPlayerRunning ? 6 : 4.5;
+    if (distanceToPlayer < fleeDistance) {
       this.aiState = 'flee';
-      this.targetX = this.position.x + (this.position.x - player.x) * 2.2;
-      this.targetZ = this.position.z + (this.position.z - player.z) * 2.2;
+      
+      // Calculate escape direction - move away from player with some randomness
+      const angle = Math.atan2(this.position.z - player.z, this.position.x - player.x);
+      const randomOffset = (Math.random() - 0.5) * 0.5; // Add some variation to escape path
+      
+      // Choose a random direction to run to
+      const fleeDist = 8 + Math.random() * 6;
+      this.targetX = this.position.x + Math.cos(angle + randomOffset) * fleeDist;
+      this.targetZ = this.position.z + Math.sin(angle + randomOffset) * fleeDist;
+      
+      // Sometimes jump when fleeing
+      if (this.isOnGround && this.jumpCooldown <= 0 && Math.random() < 0.1) {
+        this.velocity.y = Mob.MOB_JUMP_VELOCITY * 0.7;
+        this.jumpCooldown = 0.5 + Math.random() * 0.5;
+      }
       return;
     }
 
-    // Random wandering
-    if (this.aiState === 'idle' && this.wanderCooldown <= 0) {
-      if (Math.random() < 0.02) {
-        this.aiState = 'wander';
-        this.targetX = this.position.x + (Math.random() - 0.5) * 10;
-        this.targetZ = this.position.z + (Math.random() - 0.5) * 10;
+    // Grouping behavior - look for nearby same-type mobs
+    this.updateGroupingBehavior(delta);
+
+    // Random wandering with more natural movement
+    if (this.aiState === 'idle' || this.aiState === 'wander') {
+      // Random direction change with momentum
+      if (this.wanderCooldown <= 0) {
+        if (Math.random() < 0.015) { // Less frequent but more decisive
+          this.aiState = 'wander';
+          
+          // Choose wandering direction - bias towards exploring
+          const wanderAngle = Math.random() * Math.PI * 2;
+          const wanderDist = 5 + Math.random() * 10;
+          
+          this.targetX = this.position.x + Math.cos(wanderAngle) * wanderDist;
+          this.targetZ = this.position.z + Math.sin(wanderAngle) * wanderDist;
+          
+          // Set longer wandering time
+          this.wanderCooldown = 1.5 + Math.random() * 2.5;
+        }
       }
     }
 
-    // Reached target
+    // Reached target - return to idle or continue wandering
     if ((this.aiState === 'wander' || this.aiState === 'flee') && this.targetX !== null && this.targetZ !== null) {
       const distToTarget = Math.sqrt(
         Math.pow(this.targetX - this.position.x, 2) +
         Math.pow(this.targetZ - this.position.z, 2)
       );
 
-      if (distToTarget < 1) {
+      if (distToTarget < 1.5) {
         const wasFleeing = this.aiState === 'flee';
         this.aiState = 'idle';
         this.targetX = null;
         this.targetZ = null;
-        this.wanderCooldown = wasFleeing ? 1 + Math.random() * 2 : 2 + Math.random() * 4;
+        
+        // Fleeing has shorter cooldown so they can keep distance
+        this.wanderCooldown = wasFleeing ? 0.8 + Math.random() * 1.2 : 2 + Math.random() * 4;
+      }
+    }
+  }
+
+  // Enhanced grouping behavior for passive mobs
+  private updateGroupingBehavior(delta: number): void {
+    // This would integrate with entity manager to find nearby same-type mobs
+    // For now, we'll add some group cohesion logic
+    
+    // If idle, occasionally check for nearby mobs of same type
+    if (this.aiState === 'idle' && this.wanderCooldown <= 0) {
+      // Move towards center of nearby mobs if any
+      // This is a placeholder - would need entity manager integration
+      
+      // Small chance to graze (feed) when idle
+      if (Math.random() < 0.005) {
+        this.aiState = 'wander';
+        // Move in current direction a bit to "graze"
+        this.targetX = this.position.x + (Math.random() - 0.5) * 3;
+        this.targetZ = this.position.z + (Math.random() - 0.5) * 3;
       }
     }
   }
@@ -401,8 +458,9 @@ export abstract class Mob extends Entity {
     for (const drop of this.drops) {
       if (Math.random() < drop.chance) {
         const count = drop.count[0] + Math.floor(Math.random() * (drop.count[1] - drop.count[0] + 1));
-        // In a full implementation, we'd spawn item entities here
-        console.log(`Dropped ${count} x ${drop.item}`);
+        useDroppedItemStore
+          .getState()
+          .spawnDrop(drop.item, this.position.x, this.position.y, this.position.z, count);
       }
     }
   }

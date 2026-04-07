@@ -2,7 +2,8 @@
 
 import { useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { entityManager } from '@/entities/EntityManager';
+import { unifiedEntityManager, EntityType } from '@/entities/UnifiedEntityManager';
+import { EnhancedHostileMob } from '@/entities/EnhancedHostileMob';
 import * as THREE from 'three';
 
 const box = (x: number, y: number, z: number) => new THREE.BoxGeometry(x, y, z);
@@ -28,6 +29,15 @@ const GEOMETRY = {
   beak: box(0.12, 0.08, 0.12),
   comb: box(0.06, 0.12, 0.06),
 
+  wolfBody: box(0.9, 0.55, 0.35),
+  wolfHead: box(0.35, 0.3, 0.32),
+  wolfLeg: box(0.12, 0.35, 0.12),
+
+  ocelotBody: box(0.8, 0.45, 0.28),
+  ocelotHead: box(0.28, 0.24, 0.24),
+  ocelotLeg: box(0.1, 0.28, 0.1),
+  ocelotTail: box(0.08, 0.35, 0.08),
+
   humanoidBody: box(0.48, 0.7, 0.26),
   humanoidHead: box(0.4, 0.4, 0.4),
   humanoidArm: box(0.14, 0.62, 0.14),
@@ -36,6 +46,10 @@ const GEOMETRY = {
   creeperBody: box(0.6, 0.95, 0.4),
   creeperHead: box(0.58, 0.58, 0.58),
   creeperLeg: box(0.16, 0.32, 0.16),
+  
+  spiderBody: box(0.9, 0.5, 1.4),
+  spiderCephalothorax: box(0.7, 0.5, 0.6),
+  spiderLeg: box(0.1, 0.6, 0.1),
 };
 
 const MATERIALS: Record<string, THREE.MeshLambertMaterial> = {
@@ -48,21 +62,29 @@ const MATERIALS: Record<string, THREE.MeshLambertMaterial> = {
   chickenBody: new THREE.MeshLambertMaterial({ color: 0xf4f4f4 }),
   chickenAccent: new THREE.MeshLambertMaterial({ color: 0xe84a4a }),
   chickenBeak: new THREE.MeshLambertMaterial({ color: 0xf2b63d }),
+  wolf: new THREE.MeshLambertMaterial({ color: 0x8b8b8b }),
+  wolfDark: new THREE.MeshLambertMaterial({ color: 0x5b5b5b }),
+  wolfSnout: new THREE.MeshLambertMaterial({ color: 0xb7b7b7 }),
+  ocelot: new THREE.MeshLambertMaterial({ color: 0xd49a4a }),
+  ocelotDark: new THREE.MeshLambertMaterial({ color: 0x8d5f2a }),
   zombie: new THREE.MeshLambertMaterial({ color: 0x4e8b54 }),
   skeleton: new THREE.MeshLambertMaterial({ color: 0xdadada }),
   creeper: new THREE.MeshLambertMaterial({ color: 0x3baf4a }),
+  creeperIgnited: new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0xffff00, emissiveIntensity: 0.3 }),
+  spider: new THREE.MeshLambertMaterial({ color: 0x1a1a1a }),
+  spiderEye: new THREE.MeshLambertMaterial({ color: 0x0000ff }),
 };
 
 export default function Entities() {
-  const [entities, setEntities] = useState(() => entityManager.getAllEntities());
+  const [entities, setEntities] = useState<EntityType[]>(() => unifiedEntityManager.getAllEntities());
   const refreshTimerRef = useRef(0);
 
   useFrame((_, delta) => {
-    entityManager.update(delta);
+    unifiedEntityManager.update(delta);
     refreshTimerRef.current += delta;
     if (refreshTimerRef.current >= 0.1) {
       refreshTimerRef.current = 0;
-      setEntities(entityManager.getAllEntities());
+      setEntities(unifiedEntityManager.getAllEntities());
     }
   });
 
@@ -80,6 +102,9 @@ export default function Entities() {
           yaw={entity.rotation.yaw}
           type={entity.type}
           isDead={entity.isDead}
+          // Enhanced hostile mob props
+          attackProgress={entity instanceof EnhancedHostileMob ? entity.attackAnimationProgress : 0}
+          isIgnited={entity instanceof EnhancedHostileMob && entity.type === 'creeper' ? entity.isIgnited : false}
         />
       ))}
     </group>
@@ -94,6 +119,8 @@ function MobMesh({
   yaw,
   type,
   isDead,
+  attackProgress = 0,
+  isIgnited = false,
 }: {
   id: string;
   x: number;
@@ -102,9 +129,14 @@ function MobMesh({
   yaw: number;
   type: string;
   isDead: boolean;
+  attackProgress?: number;
+  isIgnited?: boolean;
 }) {
   if (isDead) return null;
   const phase = (id.charCodeAt(0) + id.length) % 2 === 0 ? 0.05 : -0.05;
+  
+  // Attack animation offset
+  const attackOffset = Math.sin(attackProgress * Math.PI) * 0.3;
 
   return (
     <group position={[x, y, z]} rotation={[0, yaw, 0]}>
@@ -112,10 +144,13 @@ function MobMesh({
       {type === 'cow' && <CowMesh phase={phase} />}
       {type === 'sheep' && <SheepMesh phase={phase} />}
       {type === 'chicken' && <ChickenMesh phase={phase} />}
-      {type === 'zombie' && <HumanoidMesh material={MATERIALS.zombie} phase={phase} />}
-      {type === 'skeleton' && <HumanoidMesh material={MATERIALS.skeleton} phase={phase} />}
-      {type === 'creeper' && <CreeperMesh phase={phase} />}
-      {!['pig', 'cow', 'sheep', 'chicken', 'zombie', 'skeleton', 'creeper'].includes(type) && (
+      {type === 'wolf' && <WolfMesh phase={phase} />}
+      {type === 'ocelot' && <OcelotMesh phase={phase} />}
+      {type === 'zombie' && <HumanoidMesh material={MATERIALS.zombie} phase={phase} attackOffset={attackOffset} />}
+      {type === 'skeleton' && <SkeletonMesh phase={phase} attackOffset={attackOffset} />}
+      {type === 'creeper' && <CreeperMesh phase={phase} isIgnited={isIgnited} attackProgress={attackProgress} />}
+      {type === 'spider' && <SpiderMesh phase={phase} />}
+      {!['pig', 'cow', 'sheep', 'chicken', 'wolf', 'ocelot', 'zombie', 'skeleton', 'creeper', 'spider'].includes(type) && (
         <mesh geometry={GEOMETRY.humanoidBody} material={MATERIALS.skeleton} />
       )}
     </group>
@@ -179,28 +214,109 @@ function ChickenMesh({ phase }: { phase: number }) {
   );
 }
 
-function HumanoidMesh({ material, phase }: { material: THREE.Material; phase: number }) {
+function WolfMesh({ phase }: { phase: number }) {
+  return (
+    <>
+      <mesh geometry={GEOMETRY.wolfBody} material={MATERIALS.wolf} position={[0, 0.36, 0]} />
+      <mesh geometry={GEOMETRY.wolfHead} material={MATERIALS.wolfDark} position={[0, 0.42, 0.34]} />
+      <mesh geometry={GEOMETRY.wolfLeg} material={MATERIALS.wolfDark} position={[-0.26, 0.12 + phase, -0.12]} />
+      <mesh geometry={GEOMETRY.wolfLeg} material={MATERIALS.wolfDark} position={[0.26, 0.12 - phase, -0.12]} />
+      <mesh geometry={GEOMETRY.wolfLeg} material={MATERIALS.wolfDark} position={[-0.26, 0.12 - phase, 0.12]} />
+      <mesh geometry={GEOMETRY.wolfLeg} material={MATERIALS.wolfDark} position={[0.26, 0.12 + phase, 0.12]} />
+      <mesh geometry={GEOMETRY.wolfLeg} material={MATERIALS.wolfDark} position={[0, 0.48, -0.2]} rotation={[0.6, 0, 0]} />
+    </>
+  );
+}
+
+function OcelotMesh({ phase }: { phase: number }) {
+  return (
+    <>
+      <mesh geometry={GEOMETRY.ocelotBody} material={MATERIALS.ocelot} position={[0, 0.26, 0]} />
+      <mesh geometry={GEOMETRY.ocelotHead} material={MATERIALS.ocelot} position={[0, 0.32, 0.24]} />
+      <mesh geometry={GEOMETRY.ocelotLeg} material={MATERIALS.ocelotDark} position={[-0.22, 0.09 + phase, -0.08]} />
+      <mesh geometry={GEOMETRY.ocelotLeg} material={MATERIALS.ocelotDark} position={[0.22, 0.09 - phase, -0.08]} />
+      <mesh geometry={GEOMETRY.ocelotLeg} material={MATERIALS.ocelotDark} position={[-0.22, 0.09 - phase, 0.08]} />
+      <mesh geometry={GEOMETRY.ocelotLeg} material={MATERIALS.ocelotDark} position={[0.22, 0.09 + phase, 0.08]} />
+      <mesh geometry={GEOMETRY.ocelotTail} material={MATERIALS.ocelotDark} position={[0, 0.34, -0.22]} rotation={[0.45, 0, 0]} />
+    </>
+  );
+}
+
+function HumanoidMesh({ material, phase, attackOffset = 0 }: { material: THREE.Material; phase: number; attackOffset?: number }) {
   return (
     <>
       <mesh geometry={GEOMETRY.humanoidBody} material={material} position={[0, 0.95, 0]} />
       <mesh geometry={GEOMETRY.humanoidHead} material={material} position={[0, 1.5, 0]} />
-      <mesh geometry={GEOMETRY.humanoidArm} material={material} position={[-0.32, 0.95 + phase, 0]} />
-      <mesh geometry={GEOMETRY.humanoidArm} material={material} position={[0.32, 0.95 - phase, 0]} />
+      <mesh geometry={GEOMETRY.humanoidArm} material={material} position={[-0.32, 0.95 + phase + attackOffset, 0]} />
+      <mesh geometry={GEOMETRY.humanoidArm} material={material} position={[0.32, 0.95 - phase + attackOffset, 0]} />
       <mesh geometry={GEOMETRY.humanoidLeg} material={material} position={[-0.14, 0.31 + phase, 0]} />
       <mesh geometry={GEOMETRY.humanoidLeg} material={material} position={[0.14, 0.31 - phase, 0]} />
     </>
   );
 }
 
-function CreeperMesh({ phase }: { phase: number }) {
+function SkeletonMesh({ phase, attackOffset = 0 }: { phase: number; attackOffset?: number }) {
   return (
     <>
-      <mesh geometry={GEOMETRY.creeperBody} material={MATERIALS.creeper} position={[0, 0.83, 0]} />
-      <mesh geometry={GEOMETRY.creeperHead} material={MATERIALS.creeper} position={[0, 1.55, 0]} />
+      <mesh geometry={GEOMETRY.humanoidBody} material={MATERIALS.skeleton} position={[0, 0.95, 0]} />
+      <mesh geometry={GEOMETRY.humanoidHead} material={MATERIALS.skeleton} position={[0, 1.5, 0]} />
+      {/* Bow holding arm */}
+      <mesh geometry={GEOMETRY.humanoidArm} material={MATERIALS.skeleton} position={[-0.32, 0.95, attackOffset * 0.5]} />
+      <mesh geometry={GEOMETRY.humanoidArm} material={MATERIALS.skeleton} position={[0.32, 0.95 + phase, 0]} />
+      <mesh geometry={GEOMETRY.humanoidLeg} material={MATERIALS.skeleton} position={[-0.14, 0.31 + phase, 0]} />
+      <mesh geometry={GEOMETRY.humanoidLeg} material={MATERIALS.skeleton} position={[0.14, 0.31 - phase, 0]} />
+    </>
+  );
+}
+
+function CreeperMesh({ phase, isIgnited, attackProgress }: { phase: number; isIgnited: boolean; attackProgress: number }) {
+  const material = isIgnited ? MATERIALS.creeperIgnited : MATERIALS.creeper;
+  // Swelling animation when charging explosion
+  const swell = isIgnited ? 1 + attackProgress * 0.3 : 1;
+  
+  return (
+    <>
+      <mesh geometry={GEOMETRY.creeperBody} material={material} position={[0, 0.83 * swell, 0]} />
+      <mesh geometry={GEOMETRY.creeperHead} material={material} position={[0, 1.55 * swell, 0]} />
       <mesh geometry={GEOMETRY.creeperLeg} material={MATERIALS.creeper} position={[-0.18, 0.16 + phase, -0.12]} />
       <mesh geometry={GEOMETRY.creeperLeg} material={MATERIALS.creeper} position={[0.18, 0.16 - phase, -0.12]} />
       <mesh geometry={GEOMETRY.creeperLeg} material={MATERIALS.creeper} position={[-0.18, 0.16 - phase, 0.12]} />
       <mesh geometry={GEOMETRY.creeperLeg} material={MATERIALS.creeper} position={[0.18, 0.16 + phase, 0.12]} />
+    </>
+  );
+}
+
+function SpiderMesh({ phase }: { phase: number }) {
+  // Spider legs alternate between phases
+  const legPhases = [
+    phase, -phase, phase, -phase,  // Left legs
+    -phase, phase, -phase, phase,  // Right legs
+  ];
+  
+  return (
+    <>
+      {/* Body */}
+      <mesh geometry={GEOMETRY.spiderBody} material={MATERIALS.spider} position={[0, 0.5, 0]} />
+      {/* Head/cephalothorax */}
+      <mesh geometry={GEOMETRY.spiderCephalothorax} material={MATERIALS.spider} position={[0, 0.6, 0.55]} />
+      {/* Eyes */}
+      <mesh position={[-0.15, 0.65, 0.85]}>
+        <boxGeometry args={[0.08, 0.08, 0.08]} />
+        <meshLambertMaterial color={MATERIALS.spiderEye.color} />
+      </mesh>
+      <mesh position={[0.15, 0.65, 0.85]}>
+        <boxGeometry args={[0.08, 0.08, 0.08]} />
+        <meshLambertMaterial color={MATERIALS.spiderEye.color} />
+      </mesh>
+      {/* Legs - 8 legs */}
+      <mesh geometry={GEOMETRY.spiderLeg} material={MATERIALS.spider} position={[-0.45, 0.5, 0.2]} rotation={[legPhases[0], 0, -0.5]} />
+      <mesh geometry={GEOMETRY.spiderLeg} material={MATERIALS.spider} position={[0.45, 0.5, 0.2]} rotation={[legPhases[4], 0, 0.5]} />
+      <mesh geometry={GEOMETRY.spiderLeg} material={MATERIALS.spider} position={[-0.5, 0.5, 0]} rotation={[legPhases[1], 0, -0.6]} />
+      <mesh geometry={GEOMETRY.spiderLeg} material={MATERIALS.spider} position={[0.5, 0.5, 0]} rotation={[legPhases[5], 0, 0.6]} />
+      <mesh geometry={GEOMETRY.spiderLeg} material={MATERIALS.spider} position={[-0.5, 0.5, -0.2]} rotation={[legPhases[2], 0, -0.5]} />
+      <mesh geometry={GEOMETRY.spiderLeg} material={MATERIALS.spider} position={[0.5, 0.5, -0.2]} rotation={[legPhases[6], 0, 0.5]} />
+      <mesh geometry={GEOMETRY.spiderLeg} material={MATERIALS.spider} position={[-0.45, 0.5, -0.4]} rotation={[legPhases[3], 0, -0.3]} />
+      <mesh geometry={GEOMETRY.spiderLeg} material={MATERIALS.spider} position={[0.45, 0.5, -0.4]} rotation={[legPhases[7], 0, 0.3]} />
     </>
   );
 }

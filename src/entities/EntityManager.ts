@@ -15,8 +15,126 @@ import { worldToChunk, worldToLocal, chunkKey } from '@/utils/coordinates';
 import { BlockType, isSolid } from '@/data/blocks';
 import { BiomeType as TerrainBiomeType } from '@/engine/TerrainGenerator';
 import { decodeTerrainBiome } from '@/utils/biomeEncoding';
+import { LightingUtils } from '@/engine/LightingOptimizer';
 
 export type MobSpawnType = 'zombie' | 'skeleton' | 'creeper' | 'pig' | 'cow' | 'sheep' | 'chicken';
+
+type SpawnWeight = { type: MobSpawnType; weight: number };
+
+const PASSIVE_SPAWN_TABLE: Partial<Record<TerrainBiomeType, SpawnWeight[]>> = {
+  [TerrainBiomeType.PLAINS]: [
+    { type: 'cow', weight: 0.3 },
+    { type: 'sheep', weight: 0.25 },
+    { type: 'pig', weight: 0.25 },
+    { type: 'chicken', weight: 0.2 },
+  ],
+  [TerrainBiomeType.SUNFLOWER_PLAINS]: [
+    { type: 'cow', weight: 0.3 },
+    { type: 'sheep', weight: 0.3 },
+    { type: 'pig', weight: 0.2 },
+    { type: 'chicken', weight: 0.2 },
+  ],
+  [TerrainBiomeType.FOREST]: [
+    { type: 'cow', weight: 0.3 },
+    { type: 'sheep', weight: 0.25 },
+    { type: 'pig', weight: 0.2 },
+    { type: 'chicken', weight: 0.25 },
+  ],
+  [TerrainBiomeType.DARK_FOREST]: [
+    { type: 'cow', weight: 0.3 },
+    { type: 'sheep', weight: 0.25 },
+    { type: 'pig', weight: 0.25 },
+    { type: 'chicken', weight: 0.2 },
+  ],
+  [TerrainBiomeType.JUNGLE]: [
+    { type: 'chicken', weight: 0.4 },
+    { type: 'pig', weight: 0.3 },
+    { type: 'cow', weight: 0.2 },
+    { type: 'sheep', weight: 0.1 },
+  ],
+  [TerrainBiomeType.SAVANNA]: [
+    { type: 'cow', weight: 0.4 },
+    { type: 'sheep', weight: 0.25 },
+    { type: 'pig', weight: 0.2 },
+    { type: 'chicken', weight: 0.15 },
+  ],
+  [TerrainBiomeType.TAIGA]: [
+    { type: 'sheep', weight: 0.35 },
+    { type: 'cow', weight: 0.25 },
+    { type: 'chicken', weight: 0.25 },
+    { type: 'pig', weight: 0.15 },
+  ],
+  [TerrainBiomeType.SNOW]: [
+    { type: 'sheep', weight: 0.4 },
+    { type: 'cow', weight: 0.25 },
+    { type: 'chicken', weight: 0.2 },
+    { type: 'pig', weight: 0.15 },
+  ],
+  [TerrainBiomeType.MOUNTAINS]: [
+    { type: 'sheep', weight: 0.45 },
+    { type: 'cow', weight: 0.25 },
+    { type: 'pig', weight: 0.15 },
+    { type: 'chicken', weight: 0.15 },
+  ],
+  [TerrainBiomeType.MEGA_MOUNTAINS]: [
+    { type: 'sheep', weight: 0.5 },
+    { type: 'cow', weight: 0.2 },
+    { type: 'pig', weight: 0.15 },
+    { type: 'chicken', weight: 0.15 },
+  ],
+  [TerrainBiomeType.SWAMP]: [
+    { type: 'pig', weight: 0.4 },
+    { type: 'chicken', weight: 0.3 },
+    { type: 'cow', weight: 0.2 },
+    { type: 'sheep', weight: 0.1 },
+  ],
+};
+
+const HOSTILE_SPAWN_TABLE: Partial<Record<TerrainBiomeType, SpawnWeight[]>> = {
+  [TerrainBiomeType.SNOW]: [
+    { type: 'skeleton', weight: 0.45 },
+    { type: 'zombie', weight: 0.35 },
+    { type: 'creeper', weight: 0.2 },
+  ],
+  [TerrainBiomeType.TAIGA]: [
+    { type: 'skeleton', weight: 0.35 },
+    { type: 'zombie', weight: 0.45 },
+    { type: 'creeper', weight: 0.2 },
+  ],
+  [TerrainBiomeType.SWAMP]: [
+    { type: 'zombie', weight: 0.55 },
+    { type: 'skeleton', weight: 0.25 },
+    { type: 'creeper', weight: 0.2 },
+  ],
+  [TerrainBiomeType.DESERT]: [
+    { type: 'skeleton', weight: 0.4 },
+    { type: 'zombie', weight: 0.4 },
+    { type: 'creeper', weight: 0.2 },
+  ],
+};
+
+const DEFAULT_PASSIVE_WEIGHTS: SpawnWeight[] = [
+  { type: 'pig', weight: 0.25 },
+  { type: 'cow', weight: 0.3 },
+  { type: 'sheep', weight: 0.25 },
+  { type: 'chicken', weight: 0.2 },
+];
+
+const DEFAULT_HOSTILE_WEIGHTS: SpawnWeight[] = [
+  { type: 'zombie', weight: 0.5 },
+  { type: 'skeleton', weight: 0.3 },
+  { type: 'creeper', weight: 0.2 },
+];
+
+function pickWeighted(types: SpawnWeight[]): MobSpawnType {
+  const total = types.reduce((sum, entry) => sum + entry.weight, 0);
+  let roll = Math.random() * total;
+  for (const entry of types) {
+    roll -= entry.weight;
+    if (roll <= 0) return entry.type;
+  }
+  return types[0].type;
+}
 
 class EntityManager {
   private entities: Map<string, Entity> = new Map();
@@ -112,16 +230,23 @@ class EntityManager {
     if (
       biomeType === TerrainBiomeType.OCEAN ||
       biomeType === TerrainBiomeType.DEEP_OCEAN ||
-      biomeType === TerrainBiomeType.VOLCANIC
+      biomeType === TerrainBiomeType.VOLCANIC ||
+      biomeType === TerrainBiomeType.MUSHROOM ||
+      biomeType === TerrainBiomeType.BADLANDS ||
+      biomeType === TerrainBiomeType.DESERT ||
+      biomeType === TerrainBiomeType.ICE_SPIKES
     ) {
       return;
     }
 
     const y = groundInfo.y;
-    const mobTypes: MobSpawnType[] = ['pig', 'cow', 'sheep', 'chicken'];
+    const lightLevel = LightingUtils.getAverageLightLevel(Math.floor(x), Math.floor(y), Math.floor(z), 2);
+    if (lightLevel < 9) return;
+
+    const table = PASSIVE_SPAWN_TABLE[biomeType] ?? DEFAULT_PASSIVE_WEIGHTS;
     const herdSize = 1 + Math.floor(Math.random() * 3);
     for (let i = 0; i < herdSize; i++) {
-      const type = mobTypes[Math.floor(Math.random() * mobTypes.length)];
+      const type = pickWeighted(table);
       const offsetX = (Math.random() - 0.5) * 3;
       const offsetZ = (Math.random() - 0.5) * 3;
       this.spawn(type, x + offsetX, y, z + offsetZ);
@@ -140,20 +265,10 @@ class EntityManager {
     if (Math.hypot(x - playerX, z - playerZ) < MOB_SPAWN_RADIUS + 2) return;
 
     const y = groundInfo.y;
+    if (!LightingUtils.isDarkEnoughForSpawning(Math.floor(x), Math.floor(y), Math.floor(z))) return;
 
-    const mobTypes: MobSpawnType[] = ['zombie', 'skeleton', 'creeper'];
-    const weights = [0.5, 0.3, 0.2]; // Zombies most common
-
-    let roll = Math.random();
-    let type: MobSpawnType = 'zombie';
-    for (let i = 0; i < mobTypes.length; i++) {
-      roll -= weights[i];
-      if (roll <= 0) {
-        type = mobTypes[i];
-        break;
-      }
-    }
-
+    const table = HOSTILE_SPAWN_TABLE[groundInfo.biome] ?? DEFAULT_HOSTILE_WEIGHTS;
+    const type = pickWeighted(table);
     this.spawn(type, x, y, z);
   }
 

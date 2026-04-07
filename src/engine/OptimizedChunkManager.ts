@@ -5,6 +5,10 @@ import { chunkKey, worldToChunk, getChunksInRadius } from '@/utils/coordinates';
 import { useGameStore } from '@/stores/gameStore';
 import { usePlayerStore } from '@/stores/playerStore';
 import { BlockType } from '@/data/blocks';
+import { textureManager } from '@/data/textureManager';
+import { clearMaterialCache as clearChunkMaterialCache } from '@/components/Chunk';
+import { clearMaterialCache as clearOptimizedChunkMaterialCache } from '@/components/OptimizedChunk';
+import MemoryManager from '@/utils/MemoryManager';
 
 // Priority levels for chunk generation
 enum ChunkPriority {
@@ -23,6 +27,7 @@ interface ChunkTask {
 }
 
 export class OptimizedChunkManager {
+  private static readonly MIN_SAFE_RENDER_DISTANCE = 8;
   private terrainGenerator: TerrainGenerator;
   private generationQueue: Map<string, ChunkTask> = new Map();
   private isGenerating: boolean = false;
@@ -39,12 +44,13 @@ export class OptimizedChunkManager {
   update(playerX: number, playerZ: number, renderDistance: number = RENDER_DISTANCE): void {
     const worldStore = useWorldStore.getState();
     const playerChunk = worldToChunk(playerX, playerZ);
+    const safeRenderDistance = Math.max(OptimizedChunkManager.MIN_SAFE_RENDER_DISTANCE, renderDistance);
 
     // Calculate time budget for this frame based on performance
     this.calculateGenerationBudget();
 
     // Get chunks that should be loaded with priority
-    const chunksToLoad = this.getChunksWithPriority(playerX, playerZ, renderDistance);
+    const chunksToLoad = this.getChunksWithPriority(playerX, playerZ, safeRenderDistance);
 
     // Find chunks to unload (optimized with early exit)
     const loadedChunks = Array.from(worldStore.loadedChunks);
@@ -54,7 +60,7 @@ export class OptimizedChunkManager {
       const dz = cz - playerChunk.z;
       const distance = Math.sqrt(dx * dx + dz * dz);
 
-      if (distance > renderDistance + 3) {
+      if (distance > safeRenderDistance + 4) {
         worldStore.removeChunk(cx, cz);
         this.generationQueue.delete(key);
         this.chunkPriorities.delete(key);
@@ -179,6 +185,7 @@ export class OptimizedChunkManager {
       x: generatedChunk.cx,
       z: generatedChunk.cz,
       blocks: generatedChunk.blocks,
+      blockStates: new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE),
       biomes: new Uint8Array(CHUNK_SIZE * CHUNK_SIZE), // Initialize empty biomes
       heightMap: new Uint16Array(CHUNK_SIZE * CHUNK_SIZE), // Initialize empty height map
       lightMap: new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE).fill(15), // Full light
@@ -223,6 +230,7 @@ export class OptimizedChunkManager {
       x: generatedChunk.cx,
       z: generatedChunk.cz,
       blocks: generatedChunk.blocks,
+      blockStates: new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE),
       biomes: new Uint8Array(CHUNK_SIZE * CHUNK_SIZE), // Initialize empty biomes
       heightMap: new Uint16Array(CHUNK_SIZE * CHUNK_SIZE), // Initialize empty height map
       lightMap: new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE).fill(15), // Full light
@@ -294,6 +302,10 @@ export class OptimizedChunkManager {
   reset(): void {
     this.generationQueue.clear();
     this.chunkPriorities.clear();
+    textureManager.clearCache();
+    clearChunkMaterialCache();
+    clearOptimizedChunkMaterialCache();
+    MemoryManager.emergencyCleanup();
     useWorldStore.getState().reset();
   }
 }

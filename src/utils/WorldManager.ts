@@ -6,7 +6,7 @@ import { worldDatabase, WorldSaveData, PlayerData, InventoryData, ChunkData, Ent
 import { BlockType } from '@/data/blocks';
 import { ItemType } from '@/data/items';
 import { CHUNK_SIZE, CHUNK_HEIGHT } from '@/utils/constants';
-import { findSafeSpawnPosition } from '@/engine/Physics';
+import { resolveSpawnLocation } from '@/utils/spawn';
 
 export class WorldManager {
   private saveInterval: NodeJS.Timeout | null = null;
@@ -80,14 +80,14 @@ export class WorldManager {
   }
 
   // Create new world
-  async createNewWorld(name: string, seed: number, gameMode: 'survival' | 'creative'): Promise<string> {
-    const worldId = worldDatabase.createWorld(name, seed, gameMode);
+  async createNewWorld(name: string, seed: number, gameMode: 'survival' | 'creative', generationMode: 'classic' | 'new_generation' = 'classic'): Promise<string> {
+    const worldId = worldDatabase.createWorld(name, seed, gameMode, generationMode);
     
     // Set as current world
     worldDatabase.setCurrentWorldId(worldId);
 
     // Initialize game state for new world
-    this.initializeNewWorld(seed, gameMode);
+    this.initializeNewWorld(seed, gameMode, generationMode);
 
     // Start auto-save
     this.startAutoSave();
@@ -130,6 +130,7 @@ export class WorldManager {
       inventory: this.createInventoryData(inventoryStore),
       chunks: this.createChunkData(worldStore),
       entities: this.createEntityData(),
+      blockEntities: Array.from(worldStore.blockEntities.entries()).map(([key, data]) => ({ key, data })),
       gameTime: gameStore.worldTime,
       weather: {
         type: 'clear', // Simplified weather system
@@ -179,14 +180,28 @@ export class WorldManager {
       useGameStore.getState().setWorldTime(saveData.gameTime);
     }
 
+    if (saveData.metadata?.generationMode) {
+      useGameStore.getState().setWorldGenerationMode(saveData.metadata.generationMode);
+    }
+
+    useGameStore.getState().setWorldInitMode('loaded');
+
     // Restore entities
     if (saveData.entities) {
       this.restoreEntityData(saveData.entities);
     }
+
+    if (saveData.blockEntities) {
+      for (const { key, data } of saveData.blockEntities) {
+        const [x, y, z] = key.split(',').map(Number);
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+        useWorldStore.getState().setBlockEntity(x, y, z, data);
+      }
+    }
   }
 
   // Initialize new world
-  private initializeNewWorld(seed: number, gameMode: 'survival' | 'creative'): void {
+  private initializeNewWorld(seed: number, gameMode: 'survival' | 'creative', generationMode: 'classic' | 'new_generation'): void {
     const playerStore = usePlayerStore.getState();
     const inventoryStore = useInventoryStore.getState();
     const gameStore = useGameStore.getState();
@@ -196,6 +211,7 @@ export class WorldManager {
 
     // Set game mode
     gameStore.setGameMode(gameMode);
+    gameStore.setWorldGenerationMode(generationMode);
 
     // Initialize starting inventory based on game mode
     if (gameMode === 'creative') {
@@ -206,9 +222,7 @@ export class WorldManager {
 
     // Set world seed
     useWorldStore.getState().setSeed(seed);
-
-    // Spawn player safely
-    this.spawnPlayerSafely();
+    gameStore.setWorldInitMode('new');
   }
 
   private findSpawnPosition(seed: number): { x: number; y: number; z: number } {
@@ -218,47 +232,16 @@ export class WorldManager {
   }
 
   private spawnPlayerSafely(spawnX: number = 0, spawnZ: number = 0) {
-    // Try multiple origin points if the first one is underwater
-    const candidates = [
-      { x: spawnX,      z: spawnZ },
-      { x: spawnX + 16, z: spawnZ },
-      { x: spawnX - 16, z: spawnZ },
-      { x: spawnX,      z: spawnZ + 16 },
-      { x: spawnX,      z: spawnZ - 16 },
-      { x: spawnX + 24, z: spawnZ + 24 },
-      { x: spawnX - 24, z: spawnZ - 24 },
-      { x: spawnX + 24, z: spawnZ - 24 },
-      { x: spawnX - 24, z: spawnZ + 24 },
-    ];
+    const resolved = resolveSpawnLocation({
+      originX: spawnX,
+      originZ: spawnZ,
+      searchRadius: 64,
+      requireLoadedChunks: true,
+      allowFallback: true,
+      fallbackY: 180,
+    });
 
-    for (const candidate of candidates) {
-      const spawn = findSafeSpawnPosition(candidate.x, candidate.z, 64);
-      // Validate Y is reasonable (not underground, not in sky) and ensure it's dry
-      if (spawn.y > 30 && spawn.y < 200) {
-        // Double-check that this position is actually safe
-        const worldStore = useWorldStore.getState();
-        const groundBlock = worldStore.getBlock(Math.floor(spawn.x), Math.floor(spawn.y - 1), Math.floor(spawn.z));
-        const feetBlock = worldStore.getBlock(Math.floor(spawn.x), Math.floor(spawn.y), Math.floor(spawn.z));
-        const headBlock = worldStore.getBlock(Math.floor(spawn.x), Math.floor(spawn.y + 1), Math.floor(spawn.z));
-        
-        // Ensure ground is solid and not liquid, and spawn space is clear
-        if (groundBlock !== null && groundBlock !== 0 && 
-            feetBlock === 0 && headBlock === 0 && 
-            groundBlock !== 8 && groundBlock !== 9) { // Not water/lava
-          
-          usePlayerStore.getState().setPosition({
-            x: spawn.x,
-            y: spawn.y + 0.1, // Small offset to ensure above ground
-            z: spawn.z,
-          });
-          console.log(`Player spawned at: ${spawn.x.toFixed(1)}, ${spawn.y.toFixed(1)}, ${spawn.z.toFixed(1)}`);
-          return spawn;
-        }
-      }
-    }
-
-    // Absolute fallback - spawn high up so player falls to ground
-    const fallback = { x: spawnX + 0.5, y: 250, z: spawnZ + 0.5 };
+    const fallback = resolved?.position ?? { x: spawnX + 0.5, y: 180, z: spawnZ + 0.5 };
     usePlayerStore.getState().setPosition(fallback);
     console.warn('Used fallback spawn position - no safe ground found near origin');
     return fallback;
@@ -321,6 +304,7 @@ export class WorldManager {
           y: chunk.y,
           z: chunk.z,
           blocks: this.flattenChunkBlocks(chunk),
+          blockStates: this.flattenChunkBlockStates(chunk),
           light: this.flattenChunkLight(chunk),
           loaded: true,
           lastModified: Date.now(),
@@ -400,6 +384,18 @@ export class WorldManager {
       }
     }
     return light;
+  }
+
+  private flattenChunkBlockStates(chunk: any): number[] {
+    const states: number[] = [];
+    for (let y = 0; y < CHUNK_HEIGHT; y++) {
+      for (let z = 0; z < CHUNK_SIZE; z++) {
+        for (let x = 0; x < CHUNK_SIZE; x++) {
+          states.push(chunk.blockStates?.[y * CHUNK_SIZE * CHUNK_SIZE + z * CHUNK_SIZE + x] || 0);
+        }
+      }
+    }
+    return states;
   }
 
   private initializeCreativeInventory(inventoryStore: any): void {

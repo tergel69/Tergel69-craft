@@ -12,9 +12,14 @@ export interface ChunkLoadingConfig {
   maxConcurrentLoads: number;
   usePooling: boolean;
   enableAsyncLoading: boolean;
+  // New performance tuning options
+  fastLoadEnabled: boolean;
+  prioritizeNearbyChunks: boolean;
+  pregenerationAhead: number;
 }
 
 export class ChunkLoadingSystem {
+  private static readonly MIN_SAFE_RENDER_DISTANCE = 8;
   private chunkPool: ChunkPool;
   private meshPool: MeshPool;
   private terrainGenerator: TerrainGenerator;
@@ -23,6 +28,15 @@ export class ChunkLoadingSystem {
   private activeLoads: Set<string> = new Set();
   private isProcessing: boolean = false;
   private performanceMonitor: any;
+  // Frame skip counter for load balancing
+  private frameSkipCounter: number = 0;
+  
+  // Look-based chunk loading
+  private lastLookDirection: { yaw: number; pitch: number } | null = null;
+  private lookDirectionChanged: boolean = false;
+  private readonly LOOK_DIRECTION_THRESHOLD = 0.1;
+  private readonly LOOK_PRIORITY_BOOST = 0.4;
+  private readonly LOOK_ANGLE_THRESHOLD = Math.PI / 4;
 
   constructor(
     seed: number,
@@ -30,10 +44,13 @@ export class ChunkLoadingSystem {
     performanceMonitor?: any
   ) {
     this.config = {
-      batchSize: 4,
-      maxConcurrentLoads: 2,
+      batchSize: 8, // Increased from 4 for faster initial load
+      maxConcurrentLoads: 4, // Increased from 2 for parallel processing
       usePooling: true,
       enableAsyncLoading: true,
+      fastLoadEnabled: true,
+      prioritizeNearbyChunks: true,
+      pregenerationAhead: 2, // Load chunks slightly ahead of player movement
       ...config
     };
 
@@ -49,43 +66,139 @@ export class ChunkLoadingSystem {
     this.performanceMonitor = performanceMonitor;
   }
 
+  // Update look direction for chunk prioritization
+  updateLookDirection(yaw: number, pitch: number): void {
+    if (!this.lastLookDirection) {
+      this.lastLookDirection = { yaw, pitch };
+      return;
+    }
+    
+    const yawDiff = Math.abs(yaw - this.lastLookDirection.yaw);
+    const pitchDiff = Math.abs(pitch - this.lastLookDirection.pitch);
+    
+    // Normalize yaw difference to [0, PI]
+    const normalizedYawDiff = Math.min(yawDiff, Math.PI * 2 - yawDiff);
+    
+    if (normalizedYawDiff > this.LOOK_DIRECTION_THRESHOLD || 
+        pitchDiff > this.LOOK_DIRECTION_THRESHOLD) {
+      this.lastLookDirection = { yaw, pitch };
+      this.lookDirectionChanged = true;
+    }
+  }
+
+  // Check if a chunk position is in the player's viewing direction
+  private isChunkInViewDirection(chunkX: number, chunkZ: number, playerChunkX: number, playerChunkZ: number): boolean {
+    if (!this.lastLookDirection) return false;
+    
+    // Calculate angle to chunk from player
+    const dx = chunkX - playerChunkX;
+    const dz = chunkZ - playerChunkZ;
+    
+    if (dx === 0 && dz === 0) return true; // Same chunk
+    
+    const angleToChunk = Math.atan2(dz, dx);
+    const viewAngle = this.lastLookDirection.yaw;
+    
+    // Calculate angular difference
+    let angleDiff = Math.abs(angleToChunk - viewAngle);
+    if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
+    
+    return angleDiff <= this.LOOK_ANGLE_THRESHOLD;
+  }
+
   // Update chunks based on player position with optimized loading
   update(playerX: number, playerZ: number, renderDistance: number = RENDER_DISTANCE): void {
     const worldStore = useWorldStore.getState();
     const playerChunk = worldToChunk(playerX, playerZ);
+    // Use actual render distance or default to 10, with minimum of 8
+    const safeRenderDistance = Math.max(8, renderDistance || 10);
+    
+    const queueBacklog = this.loadingQueue.length;
+    
+    // Adaptive pre-generation buffer based on queue size
+    const preGenBuffer = queueBacklog > 50 ? 1 : (queueBacklog > 20 ? 2 : 3);
 
     // Get chunks that should be loaded
-    const chunksToLoad = getChunksInRadius(playerX, playerZ, renderDistance);
+    const chunksToLoad = getChunksInRadius(playerX, playerZ, safeRenderDistance + preGenBuffer);
 
     // Find chunks to unload (optimized with early exit)
     const loadedChunks = Array.from(worldStore.loadedChunks);
+    const unloadRadius = safeRenderDistance + 4;
+    
     for (const key of loadedChunks) {
       const [cx, cz] = key.split(',').map(Number);
       const dx = cx - playerChunk.x;
       const dz = cz - playerChunk.z;
-      const distance = Math.sqrt(dx * dx + dz * dz);
+      const distanceSq = dx * dx + dz * dz;
 
-      if (distance > renderDistance + 3) {
+      if (distanceSq > unloadRadius * unloadRadius) {
         this.unloadChunk(cx, cz);
       }
     }
 
-    // Queue chunks for loading with priority
-    for (const { x, z } of chunksToLoad) {
+    // Queue chunks for loading with priority - adaptive based on backlog
+    let maxQueuedPerFrame: number;
+    if (queueBacklog <= 15) {
+      maxQueuedPerFrame = Math.min(10, safeRenderDistance);
+    } else if (queueBacklog <= 40) {
+      maxQueuedPerFrame = Math.min(6, Math.floor(safeRenderDistance * 0.7));
+    } else {
+      // High backlog - only queue critical nearby chunks
+      maxQueuedPerFrame = Math.min(4, Math.floor(safeRenderDistance * 0.5));
+    }
+    
+    // Sort chunks by priority - distance AND look direction
+    const sortedChunks = [...chunksToLoad].sort((a, b) => {
+      const dxA = a.x - playerChunk.x;
+      const dzA = a.z - playerChunk.z;
+      const dxB = b.x - playerChunk.x;
+      const dzB = b.z - playerChunk.z;
+      
+      // Check if in view direction
+      const inViewA = this.isChunkInViewDirection(a.x, a.z, playerChunk.x, playerChunk.z);
+      const inViewB = this.isChunkInViewDirection(b.x, b.z, playerChunk.x, playerChunk.z);
+      
+      // Chunks in view direction get priority boost
+      if (inViewA !== inViewB) {
+        return inViewB ? -1 : 1; // inViewB comes first
+      }
+      
+      // Same view direction - sort by distance
+      const distA = dxA * dxA + dzA * dzA;
+      const distB = dxB * dxB + dzB * dzB;
+      return distA - distB;
+    });
+    
+    let queuedCount = 0;
+    
+    // Extended pre-generation buffer when looking in a direction
+    const extendedPreGenBuffer = this.lookDirectionChanged ? 4 : preGenBuffer;
+    this.lookDirectionChanged = false;
+    
+    for (const { x, z } of sortedChunks) {
+      if (queuedCount >= maxQueuedPerFrame) break;
+      
       const key = chunkKey(x, z);
       if (!worldStore.isChunkLoaded(x, z) && !this.activeLoads.has(key)) {
-        // Calculate priority based on distance
+        // Calculate priority with look direction bonus
         const dx = x - playerChunk.x;
         const dz = z - playerChunk.z;
+        const inView = this.isChunkInViewDirection(x, z, playerChunk.x, playerChunk.z);
         const distance = Math.sqrt(dx * dx + dz * dz);
-        const priority = Math.floor(distance * 10); // Closer chunks have lower priority numbers
-
-        this.queueChunkForLoading(x, z, priority);
+        let priority = distance * 10;
+        if (inView) {
+          priority *= (1 - this.LOOK_PRIORITY_BOOST);
+        }
+        
+        this.queueChunkForLoading(x, z, Math.floor(priority));
+        queuedCount++;
       }
     }
 
-    // Process loading queue
-    this.processLoadingQueue();
+    // Process loading queue based on backlog
+    if (this.loadingQueue.length > 0) {
+      this.processLoadingQueue();
+    }
   }
 
   private queueChunkForLoading(x: number, z: number, priority: number): void {
@@ -115,11 +228,27 @@ export class ChunkLoadingSystem {
 
     this.isProcessing = true;
 
-    // Process chunks in batches
+    // Process chunks in batches with time budget
     const batchSize = this.calculateBatchSize();
+    const queueSize = this.loadingQueue.length;
+    
+    // Adaptive time budget based on backlog
+    let timeBudgetMs: number;
+    if (queueSize <= 15) {
+      timeBudgetMs = 10; // 10ms when queue is small
+    } else if (queueSize <= 40) {
+      timeBudgetMs = 8; // 8ms when queue is medium
+    } else {
+      timeBudgetMs = 6; // 6ms when queue is large - prioritize frame smoothness
+    }
+    
+    const start = performance.now();
     let processed = 0;
 
     while (processed < batchSize && this.loadingQueue.length > 0) {
+      // Check time budget
+      if (performance.now() - start > timeBudgetMs) break;
+      
       const chunkData = this.loadingQueue.shift()!;
       const key = chunkKey(chunkData.x, chunkData.z);
 
@@ -140,7 +269,20 @@ export class ChunkLoadingSystem {
 
   private calculateBatchSize(): number {
     const currentRenderDistance = useGameStore.getState().renderDistance ?? RENDER_DISTANCE;
-    const baseBatchSize = Math.max(1, Math.min(6, Math.floor(currentRenderDistance / 3)));
+    const queueSize = this.loadingQueue.length;
+    
+    // Adaptive batch sizing based on queue backlog
+    let baseBatchSize: number;
+    if (queueSize <= 15) {
+      // Low backlog - can process more
+      baseBatchSize = Math.max(2, Math.min(6, Math.floor(currentRenderDistance / 3)));
+    } else if (queueSize <= 40) {
+      // Medium backlog - moderate processing
+      baseBatchSize = Math.max(2, Math.min(4, Math.floor(currentRenderDistance / 4)));
+    } else {
+      // High backlog - be conservative to avoid frame drops
+      baseBatchSize = Math.max(1, Math.min(3, Math.floor(currentRenderDistance / 6)));
+    }
     
     // Adjust based on current load
     const loadFactor = 1 - (this.activeLoads.size / this.config.maxConcurrentLoads);
@@ -222,6 +364,7 @@ export class ChunkLoadingSystem {
       x,
       z,
       blocks: new Uint8Array(CHUNK_SIZE * 32 * CHUNK_SIZE), // Assuming CHUNK_HEIGHT = 32
+      blockStates: new Uint8Array(CHUNK_SIZE * 32 * CHUNK_SIZE),
       biomes: new Uint8Array(CHUNK_SIZE * CHUNK_SIZE),
       heightMap: new Uint16Array(CHUNK_SIZE * CHUNK_SIZE),
       lightMap: new Uint8Array(CHUNK_SIZE * 32 * CHUNK_SIZE).fill(15),
@@ -263,23 +406,26 @@ export class ChunkLoadingSystem {
     return chunk;
   }
 
-  // Generate initial chunks around spawn with optimized loading
+  // Generate initial chunks around spawn with smooth loading
   async generateInitialChunks(spawnX: number, spawnZ: number, radius: number = 4): Promise<void> {
     const chunks = getChunksInRadius(spawnX, spawnZ, radius);
+    const startTime = performance.now();
+    const maxTimePerBatch = 10; // 10ms max per batch for smooth initial load
+    let currentBatchTime = startTime;
+    const batchSize = 4;
     
-    // Load chunks in batches for better performance
-    const batchSize = 8;
     for (let i = 0; i < chunks.length; i += batchSize) {
-      const batch = chunks.slice(i, i + batchSize);
+      // Check if we're taking too long and yield
+      if (i > 0 && performance.now() - currentBatchTime > maxTimePerBatch) {
+        await new Promise(resolve => setTimeout(resolve, 0));
+        currentBatchTime = performance.now();
+      }
+      
+      const batch = chunks.slice(i, Math.min(i + batchSize, chunks.length));
       
       await Promise.all(
         batch.map(chunk => this.forceGenerateChunk(chunk.x, chunk.z))
       );
-      
-      // Small delay to prevent blocking the main thread
-      if (i + batchSize < chunks.length) {
-        await new Promise(resolve => setTimeout(resolve, 16)); // ~1 frame
-      }
     }
   }
 
@@ -319,6 +465,12 @@ export class ChunkLoadingSystem {
     this.config = { ...this.config, ...newConfig };
   }
 
+  // Update chunk manager with camera look direction for look-based loading
+  updateWithLookDirection(playerX: number, playerZ: number, yaw: number, pitch: number, renderDistance: number = RENDER_DISTANCE): void {
+    this.updateLookDirection(yaw, pitch);
+    this.update(playerX, playerZ, renderDistance);
+  }
+
   // Get current queue size
   getQueueSize(): number {
     return this.loadingQueue.length;
@@ -340,8 +492,11 @@ export class ChunkLoadingSystem {
 
 // Default configuration
 export const DEFAULT_CHUNK_LOADING_CONFIG: ChunkLoadingConfig = {
-  batchSize: 4,
-  maxConcurrentLoads: 2,
+  batchSize: 8,
+  maxConcurrentLoads: 4,
   usePooling: true,
   enableAsyncLoading: true,
+  fastLoadEnabled: true,
+  prioritizeNearbyChunks: true,
+  pregenerationAhead: 2,
 };

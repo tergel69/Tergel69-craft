@@ -9,6 +9,15 @@ export class TextureManager {
   private textureCache = new Map<string, THREE.Texture>();
   private preloadedTextures = new Set<string>();
 
+  private scheduleIdleWork(task: () => void): void {
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      (window as Window & { requestIdleCallback: (callback: () => void) => number }).requestIdleCallback(task);
+      return;
+    }
+
+    setTimeout(task, 0);
+  }
+
   // Get texture for a specific block type and face
   getBlockTexture(blockType: BlockType, face: FaceType = 'side'): THREE.Texture {
     // Normalize face to basic types (top, side, bottom)
@@ -83,7 +92,9 @@ export class TextureManager {
     const essentialBlocks = [
       BlockType.STONE, BlockType.DIRT, BlockType.GRASS, BlockType.SAND,
       BlockType.WATER, BlockType.OAK_LOG, BlockType.OAK_LEAVES, BlockType.COBBLESTONE,
-      BlockType.BEDROCK, BlockType.OAK_PLANKS
+      BlockType.BEDROCK, BlockType.OAK_PLANKS, BlockType.OAK_SLAB, BlockType.OAK_STAIRS, BlockType.OAK_FENCE,
+      BlockType.BIRCH_PLANKS, BlockType.BIRCH_SLAB, BlockType.BIRCH_STAIRS, BlockType.BIRCH_FENCE,
+      BlockType.SPRUCE_PLANKS, BlockType.SPRUCE_SLAB, BlockType.SPRUCE_STAIRS, BlockType.SPRUCE_FENCE
     ].filter(block => block !== undefined);
 
     const faces: ('top' | 'side' | 'bottom')[] = ['top', 'side', 'bottom'];
@@ -97,7 +108,7 @@ export class TextureManager {
         if (!this.preloadedTextures.has(cacheKey)) {
           preloadPromises.push(
             new Promise<void>((resolve) => {
-              requestIdleCallback(() => {
+              this.scheduleIdleWork(() => {
                 this.getBlockTexture(block, face);
                 this.preloadedTextures.add(cacheKey);
                 resolve();

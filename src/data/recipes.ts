@@ -12,6 +12,128 @@ export interface Recipe {
   shapeless?: boolean;
 }
 
+const CUSTOM_RECIPES_STORAGE_KEY = 'minecraft_clone.custom_recipes.v1';
+const DISCOVERED_RECIPES_STORAGE_KEY = 'minecraft_clone.discovered_recipes.v1';
+
+const customRecipeMap = new Map<string, Recipe>();
+const discoveredRecipeIds = new Set<string>();
+
+function canUseLocalStorage(): boolean {
+  return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+}
+
+function loadSerializedRecipes(): Recipe[] {
+  if (!canUseLocalStorage()) return [];
+
+  try {
+    const raw = localStorage.getItem(CUSTOM_RECIPES_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as Recipe[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistCustomRecipes(): void {
+  if (!canUseLocalStorage()) return;
+
+  try {
+    localStorage.setItem(CUSTOM_RECIPES_STORAGE_KEY, JSON.stringify([...customRecipeMap.values()]));
+  } catch {
+    // Ignore storage failures so crafting still works in private/incognito modes.
+  }
+}
+
+function loadDiscoveredRecipeIds(): string[] {
+  if (!canUseLocalStorage()) return [];
+
+  try {
+    const raw = localStorage.getItem(DISCOVERED_RECIPES_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as string[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistDiscoveredRecipes(): void {
+  if (!canUseLocalStorage()) return;
+
+  try {
+    localStorage.setItem(DISCOVERED_RECIPES_STORAGE_KEY, JSON.stringify([...discoveredRecipeIds]));
+  } catch {
+    // Ignore storage failures so discovery never blocks crafting.
+  }
+}
+
+function syncPersistentRecipeData(): void {
+  for (const recipe of loadSerializedRecipes()) {
+    if (recipe?.id) customRecipeMap.set(recipe.id, recipe);
+  }
+
+  for (const id of loadDiscoveredRecipeIds()) {
+    if (id) discoveredRecipeIds.add(id);
+  }
+}
+
+syncPersistentRecipeData();
+
+function getAllRecipesInternal(): Recipe[] {
+  return [...BUILTIN_RECIPES, ...customRecipeMap.values()];
+}
+
+export function getAllRecipes(): Recipe[] {
+  return getAllRecipesInternal();
+}
+
+export function registerRecipe(recipe: Recipe): void {
+  customRecipeMap.set(recipe.id, recipe);
+  persistCustomRecipes();
+}
+
+export function registerRecipes(recipes: Recipe[]): void {
+  for (const recipe of recipes) {
+    customRecipeMap.set(recipe.id, recipe);
+  }
+  persistCustomRecipes();
+}
+
+export function clearCustomRecipes(): void {
+  customRecipeMap.clear();
+  persistCustomRecipes();
+}
+
+export function getCustomRecipes(): Recipe[] {
+  return [...customRecipeMap.values()];
+}
+
+export function discoverRecipe(recipeId: string): void {
+  if (!recipeId) return;
+  discoveredRecipeIds.add(recipeId);
+  persistDiscoveredRecipes();
+}
+
+export function discoverRecipesFromGrid(grid: (BlockType | ItemType | null)[][]): { recipe: Recipe; consumeMask: boolean[][] } | null {
+  const match = findRecipeMatch(grid);
+  if (match) discoverRecipe(match.recipe.id);
+  return match;
+}
+
+export function isRecipeDiscovered(recipeId: string): boolean {
+  return discoveredRecipeIds.has(recipeId);
+}
+
+export function getDiscoveredRecipeIds(): string[] {
+  return [...discoveredRecipeIds];
+}
+
+export function clearDiscoveredRecipes(): void {
+  discoveredRecipeIds.clear();
+  persistDiscoveredRecipes();
+}
+
 // Helper to create a shaped recipe
 function shaped(
   id: string,
@@ -53,7 +175,7 @@ function shapeless(
   };
 }
 
-export const RECIPES: Recipe[] = [
+const BUILTIN_RECIPES: Recipe[] = [
   // ====== PLANKS FROM LOGS ======
   shapeless('oak_planks', [BlockType.OAK_LOG], BlockType.OAK_PLANKS, 4),
   shapeless('birch_planks', [BlockType.BIRCH_LOG], BlockType.BIRCH_PLANKS, 4),
@@ -72,8 +194,36 @@ export const RECIPES: Recipe[] = [
 
   // ====== BASIC CRAFTING BLOCKS ======
   shaped('crafting_table', ['PP', 'PP'], { P: BlockType.OAK_PLANKS }, BlockType.CRAFTING_TABLE),
+  shaped('crafting_table_birch', ['PP', 'PP'], { P: BlockType.BIRCH_PLANKS }, BlockType.CRAFTING_TABLE),
+  shaped('crafting_table_spruce', ['PP', 'PP'], { P: BlockType.SPRUCE_PLANKS }, BlockType.CRAFTING_TABLE),
+  shaped('crafting_table_jungle', ['PP', 'PP'], { P: BlockType.JUNGLE_PLANKS }, BlockType.CRAFTING_TABLE),
+  shaped('crafting_table_acacia', ['PP', 'PP'], { P: BlockType.ACACIA_PLANKS }, BlockType.CRAFTING_TABLE),
+  shaped('crafting_table_dark_oak', ['PP', 'PP'], { P: BlockType.DARK_OAK_PLANKS }, BlockType.CRAFTING_TABLE),
   shaped('furnace', ['CCC', 'C C', 'CCC'], { C: BlockType.COBBLESTONE }, BlockType.FURNACE),
   shaped('chest', ['PPP', 'P P', 'PPP'], { P: BlockType.OAK_PLANKS }, BlockType.CHEST),
+  shaped('chest_birch', ['PPP', 'P P', 'PPP'], { P: BlockType.BIRCH_PLANKS }, BlockType.CHEST),
+  shaped('chest_spruce', ['PPP', 'P P', 'PPP'], { P: BlockType.SPRUCE_PLANKS }, BlockType.CHEST),
+  shaped('chest_jungle', ['PPP', 'P P', 'PPP'], { P: BlockType.JUNGLE_PLANKS }, BlockType.CHEST),
+  shaped('chest_acacia', ['PPP', 'P P', 'PPP'], { P: BlockType.ACACIA_PLANKS }, BlockType.CHEST),
+  shaped('chest_dark_oak', ['PPP', 'P P', 'PPP'], { P: BlockType.DARK_OAK_PLANKS }, BlockType.CHEST),
+  shaped('oak_slab', ['PPP'], { P: BlockType.OAK_PLANKS }, BlockType.OAK_SLAB, 6),
+  shaped('birch_slab', ['PPP'], { P: BlockType.BIRCH_PLANKS }, BlockType.BIRCH_SLAB, 6),
+  shaped('spruce_slab', ['PPP'], { P: BlockType.SPRUCE_PLANKS }, BlockType.SPRUCE_SLAB, 6),
+  shaped('jungle_slab', ['PPP'], { P: BlockType.JUNGLE_PLANKS }, BlockType.JUNGLE_SLAB, 6),
+  shaped('acacia_slab', ['PPP'], { P: BlockType.ACACIA_PLANKS }, BlockType.ACACIA_SLAB, 6),
+  shaped('dark_oak_slab', ['PPP'], { P: BlockType.DARK_OAK_PLANKS }, BlockType.DARK_OAK_SLAB, 6),
+  shaped('oak_stairs', ['P  ', 'PP ', 'PPP'], { P: BlockType.OAK_PLANKS }, BlockType.OAK_STAIRS, 4),
+  shaped('birch_stairs', ['P  ', 'PP ', 'PPP'], { P: BlockType.BIRCH_PLANKS }, BlockType.BIRCH_STAIRS, 4),
+  shaped('spruce_stairs', ['P  ', 'PP ', 'PPP'], { P: BlockType.SPRUCE_PLANKS }, BlockType.SPRUCE_STAIRS, 4),
+  shaped('jungle_stairs', ['P  ', 'PP ', 'PPP'], { P: BlockType.JUNGLE_PLANKS }, BlockType.JUNGLE_STAIRS, 4),
+  shaped('acacia_stairs', ['P  ', 'PP ', 'PPP'], { P: BlockType.ACACIA_PLANKS }, BlockType.ACACIA_STAIRS, 4),
+  shaped('dark_oak_stairs', ['P  ', 'PP ', 'PPP'], { P: BlockType.DARK_OAK_PLANKS }, BlockType.DARK_OAK_STAIRS, 4),
+  shaped('oak_fence', ['SPS', 'SPS'], { S: ItemType.STICK, P: BlockType.OAK_PLANKS }, BlockType.OAK_FENCE, 3),
+  shaped('birch_fence', ['SPS', 'SPS'], { S: ItemType.STICK, P: BlockType.BIRCH_PLANKS }, BlockType.BIRCH_FENCE, 3),
+  shaped('spruce_fence', ['SPS', 'SPS'], { S: ItemType.STICK, P: BlockType.SPRUCE_PLANKS }, BlockType.SPRUCE_FENCE, 3),
+  shaped('jungle_fence', ['SPS', 'SPS'], { S: ItemType.STICK, P: BlockType.JUNGLE_PLANKS }, BlockType.JUNGLE_FENCE, 3),
+  shaped('acacia_fence', ['SPS', 'SPS'], { S: ItemType.STICK, P: BlockType.ACACIA_PLANKS }, BlockType.ACACIA_FENCE, 3),
+  shaped('dark_oak_fence', ['SPS', 'SPS'], { S: ItemType.STICK, P: BlockType.DARK_OAK_PLANKS }, BlockType.DARK_OAK_FENCE, 3),
   shaped('torch', ['C', 'S'], { C: ItemType.COAL, S: ItemType.STICK }, BlockType.TORCH, 4),
   shaped('bookshelf', ['PPP', 'BBB', 'PPP'], { P: BlockType.OAK_PLANKS, B: ItemType.BOOK }, BlockType.BOOKSHELF),
   shaped('tnt', ['GSG', 'SGS', 'GSG'], { G: ItemType.GUNPOWDER, S: BlockType.SAND }, BlockType.TNT),
@@ -296,7 +446,7 @@ export function findRecipe(grid: (BlockType | ItemType | null)[][]): Recipe | nu
   const gridHeight = grid.length;
   const gridWidth = grid[0]?.length || 0;
 
-  for (const recipe of RECIPES) {
+  for (const recipe of getAllRecipesInternal()) {
     if (recipe.shapeless) {
       // Check shapeless recipe
       const flatGrid = grid.flat().filter(item => item !== null);
@@ -368,7 +518,7 @@ export function findRecipeMatch(
   const gridHeight = grid.length;
   const gridWidth = grid[0]?.length || 0;
 
-  for (const recipe of RECIPES) {
+  for (const recipe of getAllRecipesInternal()) {
     if (recipe.shapeless) {
       const flatGrid = grid.flat().filter((item) => item !== null);
       const flatPattern = recipe.pattern.flat().filter((item) => item !== null);
@@ -440,12 +590,12 @@ export function findRecipeMatch(
 
 // Get all recipes that produce a specific item
 export function getRecipesFor(item: BlockType | ItemType): Recipe[] {
-  return RECIPES.filter(recipe => recipe.result.item === item);
+  return getAllRecipesInternal().filter(recipe => recipe.result.item === item);
 }
 
 // Get all recipes that use a specific item as ingredient
 export function getRecipesUsing(item: BlockType | ItemType): Recipe[] {
-  return RECIPES.filter(recipe =>
+  return getAllRecipesInternal().filter(recipe =>
     Object.values(recipe.ingredients).includes(item)
   );
 }

@@ -6,6 +6,7 @@ import { simpleTextureSystem } from './simpleTextures';
 export interface ItemTexture {
   texture: THREE.Texture;
   canvas: HTMLCanvasElement;
+  imageSrc: string;
 }
 
 // Improved Minecraft-style item texture generator with WebGL state preservation
@@ -57,9 +58,13 @@ export class ItemTextureGenerator {
     texture.premultiplyAlpha = false;
     texture.flipY = false;
 
-    const itemTexture: ItemTexture = { texture, canvas };
+    const itemTexture: ItemTexture = { texture, canvas, imageSrc: canvas.toDataURL('image/png') };
     this.textureCache.set(cacheKey, itemTexture);
     return itemTexture;
+  }
+
+  getItemImageSrc(item: BlockType | ItemType): string {
+    return this.generateItemTexture(item).imageSrc;
   }
 
   private drawItem(ctx: CanvasRenderingContext2D, item: BlockType | ItemType): void {
@@ -111,6 +116,9 @@ export class ItemTextureGenerator {
       case ItemType.IRON_SWORD:
       case ItemType.DIAMOND_SWORD:
         this.drawSword(ctx, itemType);
+        break;
+      case ItemType.STICK:
+        this.drawStick(ctx);
         break;
       case ItemType.APPLE:
         this.drawApple(ctx);
@@ -359,21 +367,29 @@ export class ItemTextureGenerator {
   private drawTool(ctx: CanvasRenderingContext2D, itemType: ItemType, color: string): void {
     // Draw handle
     ctx.fillStyle = color;
-    ctx.fillRect(8, 8, 48, 16);
+    ctx.fillRect(10, 10, 14, 36);
     
     // Draw head
     ctx.fillStyle = '#A0A0A0'; // Default stone color
-    ctx.fillRect(8, 24, 48, 32);
+    ctx.fillRect(20, 8, 28, 18);
   }
 
   private drawSword(ctx: CanvasRenderingContext2D, itemType: ItemType): void {
     // Draw handle
     ctx.fillStyle = '#8B4513';
-    ctx.fillRect(24, 8, 16, 24);
+    ctx.fillRect(28, 38, 8, 16);
     
     // Draw blade
     ctx.fillStyle = '#C0C0C0';
-    ctx.fillRect(20, 32, 24, 32);
+    ctx.fillRect(30, 8, 4, 30);
+  }
+
+  private drawStick(ctx: CanvasRenderingContext2D): void {
+    ctx.fillStyle = '#B07A43';
+    ctx.fillRect(28, 8, 8, 48);
+    ctx.fillStyle = '#8C5A2B';
+    ctx.fillRect(29, 10, 2, 44);
+    ctx.fillRect(33, 10, 2, 44);
   }
 
   private drawApple(ctx: CanvasRenderingContext2D): void {
@@ -1022,18 +1038,33 @@ export class ItemTextureGenerator {
   }
 
   private drawDefaultItem(ctx: CanvasRenderingContext2D, itemType: ItemType): void {
-    // Draw magenta/black checkerboard (missing texture)
-    ctx.fillStyle = '#FF00FF';
+    // Generic item icon with a simple framed silhouette so unknown items
+    // still look intentional instead of becoming a placeholder block.
+    const base = this.getFallbackColor(itemType);
+    ctx.fillStyle = '#151515';
     ctx.fillRect(0, 0, this.SIZE, this.SIZE);
-    
-    for (let y = 0; y < this.SIZE; y += 8) {
-      for (let x = 0; x < this.SIZE; x += 8) {
-        if ((x + y) % 16 === 0) {
-          ctx.fillStyle = '#000000';
-          ctx.fillRect(x, y, 8, 8);
-        }
-      }
-    }
+    ctx.fillStyle = base;
+    ctx.beginPath();
+    ctx.roundRect(12, 12, 40, 40, 8);
+    ctx.fill();
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.globalAlpha = 0.18;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  private getFallbackColor(itemType: ItemType): string {
+    const name = itemType.toString();
+    if (name.includes('spawn_egg')) return '#8A4FFF';
+    if (name.includes('music_disc')) return '#1D1D1D';
+    if (name.includes('boat')) return '#8B5A2B';
+    if (name.includes('minecart')) return '#6F6F6F';
+    if (name.includes('bucket')) return '#A0A0A0';
+    if (name.includes('potion')) return '#4FC3F7';
+    if (name.includes('book')) return '#7B4A12';
+    if (name.includes('disc')) return '#2E2E2E';
+    return '#6E7D4A';
   }
 
   private getBlockColor(blockType: BlockType): string {

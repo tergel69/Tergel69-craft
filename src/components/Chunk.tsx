@@ -17,8 +17,8 @@ interface ChunkProps {
 // Material cache to avoid creating duplicate materials per texture
 const materialCache = new Map<string, THREE.MeshLambertMaterial>();
 
-function getMaterialForTexture(texture: THREE.Texture, isTransparent: boolean): THREE.MeshLambertMaterial {
-  const cacheKey = `${texture.uuid}_${isTransparent}`;
+function getMaterialForTexture(texture: THREE.Texture, renderMode: 'opaque' | 'cutout' | 'translucent'): THREE.MeshLambertMaterial {
+  const cacheKey = `${texture.uuid}_${renderMode}`;
   if (materialCache.has(cacheKey)) {
     return materialCache.get(cacheKey)!;
   }
@@ -26,13 +26,16 @@ function getMaterialForTexture(texture: THREE.Texture, isTransparent: boolean): 
   const material = createBlockMaterial();
   material.map = texture;
 
-  // Enable alpha testing for transparent blocks (leaves, flowers, grass, etc.)
-  // Use alphaTest instead of transparent for cutout rendering - avoids sorting issues
-  if (isTransparent) {
+  if (renderMode === 'cutout') {
     material.alphaTest = 0.1;
     material.transparent = false;
     material.side = THREE.DoubleSide;
     material.depthWrite = true;
+  } else if (renderMode === 'translucent') {
+    material.transparent = true;
+    material.opacity = 0.6;
+    material.side = THREE.DoubleSide;
+    material.depthWrite = false;
   }
 
   material.needsUpdate = true;
@@ -67,7 +70,7 @@ export default function Chunk({ chunkX, chunkZ, version }: ChunkProps) {
     south: getChunk(chunkX, chunkZ + 1),
     east: getChunk(chunkX + 1, chunkZ),
     west: getChunk(chunkX - 1, chunkZ),
-  }), [chunkX, chunkZ, getChunk, version]);
+  }), [chunkX, chunkZ, getChunk]);
 
   // Build multi-texture mesh when chunk data changes
   const multiTextureMeshes = useMemo(() => {
@@ -131,9 +134,9 @@ export default function Chunk({ chunkX, chunkZ, version }: ChunkProps) {
         <mesh
           key={index}
           geometry={meshData.geometry}
-          material={getMaterialForTexture(meshData.texture, meshData.isTransparent)}
+          material={getMaterialForTexture(meshData.texture, meshData.renderMode)}
           frustumCulled={true}
-          renderOrder={meshData.isTransparent ? 1 : 0}
+          renderOrder={meshData.renderMode === 'opaque' ? 0 : 1}
         />
       ))}
 
@@ -142,7 +145,7 @@ export default function Chunk({ chunkX, chunkZ, version }: ChunkProps) {
         <mesh
           geometry={waterGeometry}
           material={sharedWaterMaterial}
-          renderOrder={1}
+          renderOrder={2}
           frustumCulled={true}
         />
       )}

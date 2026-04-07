@@ -1,5 +1,5 @@
 import { usePlayerStore } from '@/stores/playerStore';
-import { useWorldStore } from '@/stores/worldStore';
+import { useWorldStore, BlockEntityData } from '@/stores/worldStore';
 import { useInventoryStore } from '@/stores/inventoryStore';
 import { useGameStore } from '@/stores/gameStore';
 import { BlockType } from '@/data/blocks';
@@ -10,6 +10,7 @@ export interface WorldMetadata {
   name: string;
   seed: number;
   gameMode: 'survival' | 'creative';
+  generationMode?: 'classic' | 'new_generation';
   difficulty: 'peaceful' | 'easy' | 'normal' | 'hard';
   creationDate: number;
   lastPlayed: number;
@@ -61,6 +62,7 @@ export interface ChunkData {
   y: number;
   z: number;
   blocks: number[]; // Flattened 16x256x16 array
+  blockStates?: number[]; // Optional per-block state data
   light: number[]; // Light values
   loaded: boolean;
   lastModified: number;
@@ -83,6 +85,7 @@ export interface WorldSaveData {
   inventory: InventoryData;
   chunks: ChunkData[];
   entities: EntityData[];
+  blockEntities?: Array<{ key: string; data: BlockEntityData }>;
   gameTime: number;
   weather: {
     type: 'clear' | 'rain' | 'thunder';
@@ -169,7 +172,7 @@ class WorldDatabase {
     this.saveWorldList(worldList);
   }
 
-  createWorld(name: string, seed: number, gameMode: 'survival' | 'creative'): string {
+  createWorld(name: string, seed: number, gameMode: 'survival' | 'creative', generationMode: 'classic' | 'new_generation' = 'classic'): string {
     const worldList = this.getWorldList();
     
     // Check if world name already exists
@@ -190,6 +193,7 @@ class WorldDatabase {
       name,
       seed,
       gameMode,
+      generationMode,
       difficulty: 'normal',
       creationDate: now,
       lastPlayed: now,
@@ -207,6 +211,7 @@ class WorldDatabase {
       inventory: this.createEmptyInventoryData(),
       chunks: [],
       entities: [],
+      blockEntities: [],
       gameTime: 0,
       weather: {
         type: 'clear',

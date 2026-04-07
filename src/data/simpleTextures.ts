@@ -98,6 +98,10 @@ export class SimpleTextureSystem {
         if (face === 'top' || face === 'bottom') this.drawLogTop(ctx, '#A08050', '#6B5839');
         else this.drawLogSide(ctx, '#6B5839', '#553D24');
         break;
+      case BlockType.CHERRY_LOG:
+        if (face === 'top' || face === 'bottom') this.drawLogTop(ctx, '#D9A1A0', '#B87F7C');
+        else this.drawLogSide(ctx, '#C88486', '#9E5F61');
+        break;
       case BlockType.BIRCH_LOG:
         if (face === 'top' || face === 'bottom') this.drawLogTop(ctx, '#C8B77C', '#A08050');
         else this.drawBirchLogSide(ctx);
@@ -123,10 +127,25 @@ export class SimpleTextureSystem {
       case BlockType.OAK_PLANKS:
         this.drawPlanks(ctx, '#BA945E', '#9A7A4E');
         break;
+      case BlockType.OAK_SLAB:
+      case BlockType.OAK_STAIRS:
+      case BlockType.OAK_FENCE:
+        this.drawPlanks(ctx, '#BA945E', '#9A7A4E');
+        break;
+      case BlockType.BIRCH_SLAB:
+      case BlockType.BIRCH_STAIRS:
+      case BlockType.BIRCH_FENCE:
+        this.drawPlanks(ctx, '#D5C98E', '#C5B97E');
+        break;
       case BlockType.BIRCH_PLANKS:
         this.drawPlanks(ctx, '#D5C98E', '#C5B97E');
         break;
       case BlockType.SPRUCE_PLANKS:
+        this.drawPlanks(ctx, '#7A5A34', '#6A4A24');
+        break;
+      case BlockType.SPRUCE_SLAB:
+      case BlockType.SPRUCE_STAIRS:
+      case BlockType.SPRUCE_FENCE:
         this.drawPlanks(ctx, '#7A5A34', '#6A4A24');
         break;
       case BlockType.JUNGLE_PLANKS:
@@ -148,6 +167,9 @@ export class SimpleTextureSystem {
       // Leaves
       case BlockType.OAK_LEAVES:
         this.drawLeaves(ctx, '#4A7A23', '#3A6A13');
+        break;
+      case BlockType.CHERRY_LEAVES:
+        this.drawLeaves(ctx, '#F0B2CC', '#E188AE');
         break;
       case BlockType.BIRCH_LEAVES:
         this.drawLeaves(ctx, '#6B8E4E', '#5B7E3E');
@@ -500,6 +522,9 @@ export class SimpleTextureSystem {
       case BlockType.CACTUS:
         if (face === 'top') this.drawCactusTop(ctx);
         else this.drawCactusSide(ctx);
+        break;
+      case BlockType.DEAD_BUSH:
+        this.drawDeadBush(ctx);
         break;
       case BlockType.TALL_GRASS:
         this.drawTallGrass(ctx);
@@ -1746,6 +1771,19 @@ export class SimpleTextureSystem {
     ctx.fillStyle = '#4B7B13';
     ctx.fillRect(2, 0, 1, 8);
     ctx.fillRect(5, 0, 1, 8);
+  }
+
+  private drawDeadBush(ctx: CanvasRenderingContext2D): void {
+    ctx.fillStyle = 'transparent';
+    ctx.clearRect(0, 0, 8, 8);
+
+    ctx.fillStyle = '#8E6A3A';
+    ctx.fillRect(1, 5, 2, 1);
+    ctx.fillRect(2, 3, 1, 3);
+    ctx.fillRect(4, 4, 2, 1);
+    ctx.fillRect(5, 2, 1, 4);
+    ctx.fillRect(0, 4, 1, 2);
+    ctx.fillRect(6, 5, 2, 1);
   }
 
   private drawTallGrass(ctx: CanvasRenderingContext2D): void {

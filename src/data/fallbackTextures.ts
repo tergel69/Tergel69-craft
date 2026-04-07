@@ -83,6 +83,7 @@ export class FallbackTextureGenerator {
       case BlockType.JUNGLE_LOG:
       case BlockType.ACACIA_LOG:
       case BlockType.DARK_OAK_LOG:
+      case BlockType.CHERRY_LOG:
         return '#884400'; // Wood brown
       case BlockType.OAK_PLANKS:
       case BlockType.BIRCH_PLANKS:
@@ -97,6 +98,7 @@ export class FallbackTextureGenerator {
       case BlockType.JUNGLE_LEAVES:
       case BlockType.ACACIA_LEAVES:
       case BlockType.DARK_OAK_LEAVES:
+      case BlockType.CHERRY_LEAVES:
         return '#33AA33'; // Leaf green
       case BlockType.GLASS:
         return '#66CCFF'; // Light blue
@@ -134,6 +136,8 @@ export class FallbackTextureGenerator {
         return '#FFFF55'; // Yellow
       case BlockType.CACTUS:
         return '#338833'; // Cactus green
+      case BlockType.DEAD_BUSH:
+        return '#9E7B50'; // Dry brush
       case BlockType.SUGAR_CANE:
         return '#44AA44'; // Cane green
       case BlockType.PUMPKIN:
@@ -170,6 +174,7 @@ export class FallbackTextureGenerator {
       case BlockType.JUNGLE_LOG:
       case BlockType.ACACIA_LOG:
       case BlockType.DARK_OAK_LOG:
+      case BlockType.CHERRY_LOG:
         return '#AA6600'; // Lighter wood
       case BlockType.OAK_LEAVES:
       case BlockType.BIRCH_LEAVES:
@@ -177,6 +182,7 @@ export class FallbackTextureGenerator {
       case BlockType.JUNGLE_LEAVES:
       case BlockType.ACACIA_LEAVES:
       case BlockType.DARK_OAK_LEAVES:
+      case BlockType.CHERRY_LEAVES:
         return '#66FF66'; // Lighter green
       default:
         return '#FFFFFF'; // White highlights

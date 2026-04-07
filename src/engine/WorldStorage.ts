@@ -9,6 +9,7 @@ export interface SavedWorld {
   id: string;
   name: string;
   seed: number;
+  generationMode?: 'classic' | 'new_generation';
   createdAt: number;
   lastPlayed: number;
   playerPosition: { x: number; y: number; z: number };

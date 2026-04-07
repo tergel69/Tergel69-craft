@@ -14,15 +14,17 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { create } from 'zustand';
 import { usePlayerStore } from '@/stores/playerStore';
-import { useInventoryStore } from '@/stores/inventoryStore';
+import { useInventoryStore, getItemColor } from '@/stores/inventoryStore';
 import { useWorldStore } from '@/stores/worldStore';
 import { BlockType, isSolid } from '@/data/blocks';
+import { ItemType } from '@/data/items';
 
 // ─── Store ────────────────────────────────────────────────────────────────────
 
 export interface DroppedItem {
   id:        string;
-  blockType: number;
+  item:      BlockType | ItemType;
+  count:     number;
   x:         number;
   y:         number;
   z:         number;
@@ -33,7 +35,7 @@ export interface DroppedItem {
 
 interface DroppedItemStore {
   items:         DroppedItem[];
-  spawnDrop:     (blockType: number, x: number, y: number, z: number) => void;
+  spawnDrop:     (item: BlockType | ItemType, x: number, y: number, z: number, count?: number) => void;
   collectItem:   (id: string) => void;
   clearCollected:() => void;
 }
@@ -43,14 +45,15 @@ let _id = 0;
 export const useDroppedItemStore = create<DroppedItemStore>((set) => ({
   items: [],
 
-  spawnDrop(blockType, x, y, z) {
-    if (blockType === BlockType.AIR) return;
+  spawnDrop(item, x, y, z, count = 1) {
+    if (typeof item === 'number' && item === BlockType.AIR) return;
     const id = `drop_${++_id}`;
     const scatter = () => (Math.random() - 0.5) * 0.5;
     set(s => ({
       items: [...s.items, {
         id,
-        blockType,
+        item,
+        count,
         x: x + 0.5 + scatter(),
         y: y + 1.0,          // start 1 block above where it was broken
         z: z + 0.5 + scatter(),
@@ -105,26 +108,46 @@ const GLOWING_BLOCKS = new Set([
   BlockType.EMERALD_ORE,
 ]);
 
-function getColor(bt: number): THREE.Color {
-  const rgb = BLOCK_COLORS[bt];
-  return rgb ? new THREE.Color(rgb[0]/255, rgb[1]/255, rgb[2]/255) : new THREE.Color(0.55, 0.55, 0.55);
+function hashItemSeed(item: BlockType | ItemType): number {
+  if (typeof item === 'number') return item * 9973;
+  let h = 0;
+  for (let i = 0; i < item.length; i++) {
+    h = Math.imul(h ^ item.charCodeAt(i), 0x45d9f3b);
+  }
+  return h >>> 0;
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+  const cleaned = hex.replace('#', '');
+  const value = parseInt(cleaned.length === 3
+    ? cleaned.split('').map((c) => c + c).join('')
+    : cleaned, 16);
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+}
+
+function getColor(item: BlockType | ItemType): THREE.Color {
+  const hex = getItemColor(item);
+  const [r, g, b] = hexToRgb(hex);
+  return new THREE.Color(r / 255, g / 255, b / 255);
 }
 
 // Canvas texture cache
-const texCache = new Map<number, THREE.CanvasTexture>();
-function getTexture(bt: number): THREE.CanvasTexture {
-  if (texCache.has(bt)) return texCache.get(bt)!;
+const texCache = new Map<string, THREE.CanvasTexture>();
+function getTexture(item: BlockType | ItemType): THREE.CanvasTexture {
+  const key = typeof item === 'number' ? `b:${item}` : `i:${item}`;
+  if (texCache.has(key)) return texCache.get(key)!;
   const size = 16;
   const cv = document.createElement('canvas');
   cv.width = cv.height = size;
   const ctx = cv.getContext('2d')!;
-  const c = getColor(bt);
+  const c = getColor(item);
   const r = Math.round(c.r * 255), g = Math.round(c.g * 255), b = Math.round(c.b * 255);
   ctx.fillStyle = `rgb(${r},${g},${b})`;
   ctx.fillRect(0, 0, size, size);
-  const rng = (s: number) => { s = Math.sin(s * 9301 + 49297) * 233280; return s - Math.floor(s); };
+  const seed = hashItemSeed(item);
+  const rng = (s: number) => { s = Math.sin(s * 9301 + 49297 + seed) * 233280; return s - Math.floor(s); };
   for (let py = 0; py < size; py++) for (let px = 0; px < size; px++) {
-    const n = rng(px * 17 + py * 31 + bt * 7) * 0.2 - 0.1;
+    const n = rng(px * 17 + py * 31) * 0.2 - 0.1;
     const nr = Math.max(0, Math.min(255, r + n * 80));
     const ng2 = Math.max(0, Math.min(255, g + n * 80));
     const nb = Math.max(0, Math.min(255, b + n * 80));
@@ -137,7 +160,7 @@ function getTexture(bt: number): THREE.CanvasTexture {
   ctx.beginPath(); ctx.moveTo(size, 0); ctx.lineTo(size, size); ctx.lineTo(0, size); ctx.stroke();
   const t = new THREE.CanvasTexture(cv);
   t.magFilter = t.minFilter = THREE.NearestFilter;
-  texCache.set(bt, t);
+  texCache.set(key, t);
   return t;
 }
 
@@ -146,6 +169,7 @@ const GRAVITY      = 14.0;
 const BOB_SPEED    = 2.2;
 const BOB_HEIGHT   = 0.10;
 const PICKUP_DIST  = 1.5;
+const PICKUP_DIST_SQ = PICKUP_DIST * PICKUP_DIST;
 const DESPAWN_SECS = 300;
 const ITEM_SIZE    = 0.35;
 
@@ -158,13 +182,12 @@ function SingleDrop({ item }: { item: DroppedItem }) {
   const pz        = useRef(item.z);
   const vy        = useRef(item.vy);
   const landed    = useRef(false);
-  const landedY   = useRef(0);
   const pickedUp  = useRef(false); // local flag to prevent double-fire
 
-  const tex = useMemo(() => getTexture(item.blockType), [item.blockType]);
+  const tex = useMemo(() => getTexture(item.item), [item.item]);
   const mat = useMemo(() => new THREE.MeshLambertMaterial({ map: tex }), [tex]);
-  const glows = GLOWING_BLOCKS.has(item.blockType);
-  const glowColor = useMemo(() => getColor(item.blockType), [item.blockType]);
+  const glows = typeof item.item === 'number' && GLOWING_BLOCKS.has(item.item);
+  const glowColor = useMemo(() => getColor(item.item), [item.item]);
 
   useFrame((_, delta) => {
     const mesh = meshRef.current;
@@ -200,7 +223,6 @@ function SingleDrop({ item }: { item: DroppedItem }) {
         py.current = feetY + 1 + 0.01;
         vy.current = 0;
         landed.current = true;
-        landedY.current = py.current;
       } else {
         py.current = nextY;
       }
@@ -219,9 +241,9 @@ function SingleDrop({ item }: { item: DroppedItem }) {
     const dx = player.x - px.current;
     const dy = (player.y + 1) - py.current;
     const dz = player.z - pz.current;
-    if (Math.sqrt(dx*dx + dy*dy + dz*dz) < PICKUP_DIST) {
+    if (dx * dx + dy * dy + dz * dz < PICKUP_DIST_SQ) {
       pickedUp.current = true; // prevent re-entry before store update propagates
-      useInventoryStore.getState().addItem?.(item.blockType, 1);
+      useInventoryStore.getState().addItem?.(item.item, item.count);
       useDroppedItemStore.getState().collectItem(item.id);
     }
   });

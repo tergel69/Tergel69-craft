@@ -5,7 +5,7 @@ import { Canvas } from '@react-three/fiber';
 import { useGameStore } from '@/stores/gameStore';
 import World from './World';
 import Player from './Player';
-import Sky from './Sky';
+import Sky from './OptimizedSky';
 import Entities from './Entities';
 import PlayerModel from './PlayerModel';
 import HUD from './HUD';
@@ -18,6 +18,9 @@ import BlockBreakOverlay from './BlockBreakOverlay';
 import CreativeInventory from './CreativeInventory';
 import PerformanceHUD from './PerformanceHUD';
 import DroppedItems from './DroppedItems';
+import DeathScreen from './DeathScreen';
+import ContainerScreen, { FurnaceProcessor } from './ContainerScreen';
+import { ensureAudioUnlocked } from '@/utils/audio';
 
 const MemoizedHUD           = memo(HUD);
 const MemoizedMainMenu      = memo(MainMenu);
@@ -35,6 +38,20 @@ export default function Game() {
     const id = setInterval(() => updateTime(100), 100);
     return () => clearInterval(id);
   }, [gameState, updateTime]);
+
+  useEffect(() => {
+    const primeAudio = () => {
+      void ensureAudioUnlocked();
+    };
+
+    window.addEventListener('pointerdown', primeAudio, { once: true, passive: true });
+    window.addEventListener('keydown', primeAudio, { once: true });
+
+    return () => {
+      window.removeEventListener('pointerdown', primeAudio);
+      window.removeEventListener('keydown', primeAudio);
+    };
+  }, []);
 
   // Central key handler — inventory open/close and pause
   useEffect(() => {
@@ -63,7 +80,7 @@ export default function Game() {
           setGameState('paused');
         } else if (gameState === 'paused') {
           setGameState('playing');
-        } else if (gameState === 'inventory' || gameState === 'crafting') {
+        } else if (gameState === 'inventory' || gameState === 'crafting' || gameState === 'chest' || gameState === 'furnace' || gameState === 'enchanting') {
           setGameState('playing');
         }
       }
@@ -79,7 +96,11 @@ export default function Game() {
     gameState === 'paused'    ||
     gameState === 'inventory' ||
     gameState === 'crafting'  ||
-    gameState === 'loading';
+    gameState === 'chest'     ||
+    gameState === 'furnace'   ||
+    gameState === 'enchanting'||
+    gameState === 'loading'   ||
+    gameState === 'dead';
 
   return (
     <div className="w-screen h-screen overflow-hidden bg-black">
@@ -91,7 +112,7 @@ export default function Game() {
             powerPreference: 'high-performance',
             stencil: false, depth: true,
           }}
-          dpr={[1, 1.5]}
+          dpr={[1, 1.25]}
           onCreated={({ gl }) => gl.setClearColor(0x87CEEB, 1)}
         >
           <Suspense fallback={null}>
@@ -111,8 +132,11 @@ export default function Game() {
       {gameState === 'playing' && <MemoizedHUD />}
       <Inventory />
       <CraftingTable />
+      <ContainerScreen />
       <CreativeInventory />
       <MemoizedPauseMenu />
+      <DeathScreen />
+      <FurnaceProcessor />
       <PerformanceHUD />
       {gameState === 'playing' && <ClickToPlayHint />}
     </div>

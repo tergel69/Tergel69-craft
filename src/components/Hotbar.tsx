@@ -11,19 +11,35 @@ export default function Hotbar() {
   const selectedSlot = usePlayerStore((state) => state.selectedSlot);
 
   return (
-    <div className="flex gap-0.5 bg-black/60 p-1 rounded">
+    <div className="flex gap-0.5 bg-black/70 p-1.5 rounded-lg" style={{
+      boxShadow: '0 4px 12px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)',
+      border: '2px solid rgba(0,0,0,0.3)'
+    }}>
       {hotbar.map((slot, index) => (
         <div
           key={index}
-          className={`
-            w-12 h-12 relative flex items-center justify-center
-            border-2 transition-colors
-            ${index === selectedSlot
-              ? 'border-white bg-white/20'
-              : 'border-gray-600 bg-black/40'
-            }
-          `}
+          className={index === selectedSlot
+            ? "w-14 h-14 relative flex items-center justify-center border-2 border-white bg-white/20"
+            : "w-14 h-14 relative flex items-center justify-center border-2 border-gray-600 bg-black/40"
+          }
+          style={{
+            borderRadius: '4px',
+            boxShadow: index === selectedSlot
+              ? '0 0 12px rgba(255,255,255,0.4), inset 0 1px 0 rgba(255,255,255,0.1)'
+              : 'inset 1px 1px 0 rgba(255,255,255,0.05), inset -1px -1px 0 rgba(0,0,0,0.2)',
+            transition: 'all 0.15s ease'
+          }}
         >
+          {/* Inner highlight */}
+          <div style={{
+            position: 'absolute',
+            inset: 2,
+            background: index === selectedSlot
+              ? 'linear-gradient(145deg, rgba(255,255,255,0.1) 0%, transparent 50%)'
+              : 'linear-gradient(145deg, rgba(255,255,255,0.03) 0%, transparent 40%)',
+            borderRadius: '2px',
+            pointerEvents: 'none'
+          }} />
           {slot.item !== null && (
             <>
               {/* Item icon */}
@@ -31,7 +47,14 @@ export default function Hotbar() {
 
               {/* Item count */}
               {slot.count > 1 && (
-                <span className="absolute bottom-0 right-0.5 text-white text-xs font-bold drop-shadow-lg">
+                <span
+                  className="absolute bottom-0.5 right-0.5 text-white text-xs font-bold"
+                  style={{
+                    textShadow: '1px 1px 0 #000, -1px -1px 0 #000, 0 0 3px #000',
+                    fontFamily: 'monospace',
+                    fontWeight: 'bold'
+                  }}
+                >
                   {slot.count}
                 </span>
               )}
@@ -44,7 +67,10 @@ export default function Hotbar() {
           )}
 
           {/* Slot number hint */}
-          <span className="absolute top-0 left-0.5 text-gray-400 text-[10px]">
+          <span
+            className="absolute top-0.5 left-1 text-gray-400 text-[9px]"
+            style={{ fontFamily: 'monospace' }}
+          >
             {index + 1}
           </span>
         </div>
@@ -54,20 +80,19 @@ export default function Hotbar() {
 }
 
 function ItemIcon({ item }: { item: BlockType | ItemType }) {
-  // Use the new item texture generator
-  const itemTexture = itemTextureGenerator.generateItemTexture(item);
-  const canvas = itemTexture.canvas;
+  const src = itemTextureGenerator.getItemImageSrc(item);
 
   return (
     <div
-      className="w-8 h-8 border border-black/30 relative"
+      className="w-9 h-9 border border-black/30 relative"
       style={{
-        borderRadius: '2px',
-        boxShadow: 'inset 2px 2px 0 rgba(255,255,255,0.3), inset -2px -2px 0 rgba(0,0,0,0.3)',
+        borderRadius: '3px',
+        boxShadow: 'inset 2px 2px 0 rgba(255,255,255,0.35), inset -2px -2px 0 rgba(0,0,0,0.35)',
+        background: 'linear-gradient(145deg, rgba(255,255,255,0.1) 0%, rgba(0,0,0,0.2) 100%)',
       }}
     >
       <img
-        src={canvas.toDataURL()}
+        src={src}
         alt={getItemName(item)}
         className="w-full h-full object-cover"
         style={{
@@ -86,12 +111,16 @@ function DurabilityBar({ current, max }: { current: number; max: number }) {
   else if (percentage < 0.5) color = '#F59E0B'; // Orange
 
   return (
-    <div className="absolute bottom-0.5 left-0.5 right-0.5 h-0.5 bg-black/50">
+    <div className="absolute bottom-1 left-1 right-1 h-1 bg-black/60 rounded-sm" style={{
+      overflow: 'hidden',
+      border: '1px solid rgba(0,0,0,0.3)'
+    }}>
       <div
         className="h-full transition-all"
         style={{
           width: `${percentage * 100}%`,
           backgroundColor: color,
+          boxShadow: `0 0 4px ${color}80`,
         }}
       />
     </div>

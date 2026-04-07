@@ -10,6 +10,11 @@ export interface MouseState {
   middleButton: boolean;
 }
 
+function normalizeSensitivity(value: number): number {
+  if (!Number.isFinite(value)) return 0.0008;
+  return Math.max(0.0002, Math.min(0.01, value > 0.05 ? value / 1000 : value));
+}
+
 export function useMouse(sensitivity: number = 0.0008) {
   const [isLocked, setIsLocked] = useState(false);
   const movement = useRef({ x: 0, y: 0 });
@@ -18,7 +23,7 @@ export function useMouse(sensitivity: number = 0.0008) {
 
   // Keep sensitivity ref up to date without recreating callbacks
   useEffect(() => {
-    sensitivityRef.current = sensitivity;
+    sensitivityRef.current = normalizeSensitivity(sensitivity);
   }, [sensitivity]);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {

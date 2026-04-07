@@ -6,7 +6,8 @@ import { useGameStore } from '@/stores/gameStore';
 import { itemTextureGenerator } from '@/data/itemTextures';
 import { BlockType, BLOCKS } from '@/data/blocks';
 import { ItemType } from '@/data/items';
-import { findRecipeMatch } from '@/data/recipes';
+import { discoverRecipe, findRecipeMatch, getAllRecipes, isRecipeDiscovered } from '@/data/recipes';
+import { SMELTING_RECIPES } from '@/data/smelting';
 
 export default function CraftingTable() {
   const gameState = useGameStore((state) => state.gameState);
@@ -26,9 +27,14 @@ export default function CraftingTable() {
   const clearCraftingGrid3x3 = useInventoryStore((state) => state.clearCraftingGrid3x3);
 
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [showRecipeBook, setShowRecipeBook] = useState(false);
+  const [recipeBookTab, setRecipeBookTab] = useState<'crafting' | 'smelting'>('crafting');
+  const [recipeBookFilter, setRecipeBookFilter] = useState<'all' | 'discovered'>('all');
+  const [recipeSearch, setRecipeSearch] = useState('');
   const [consumeMask, setConsumeMask] = useState<boolean[][]>(
     Array.from({ length: 3 }, () => Array.from({ length: 3 }, () => false))
   );
+  const [matchedRecipeId, setMatchedRecipeId] = useState<string | null>(null);
 
   // Update held item display position
   useEffect(() => {
@@ -55,9 +61,11 @@ export default function CraftingTable() {
         count: match.recipe.result.count,
       });
       setConsumeMask(match.consumeMask);
+      setMatchedRecipeId(match.recipe.id);
     } else {
       setCraftingResult3x3({ item: null, count: 0 });
       setConsumeMask(Array.from({ length: 3 }, () => Array.from({ length: 3 }, () => false)));
+      setMatchedRecipeId(null);
     }
   }, [craftingGrid3x3, setCraftingResult3x3]);
 
@@ -77,6 +85,10 @@ export default function CraftingTable() {
       return;
     }
 
+    if (matchedRecipeId) {
+      discoverRecipe(matchedRecipeId);
+    }
+
     // Consume only the slots that matched the recipe
     const newGrid = craftingGrid3x3.map((slot, idx) => {
       const y = Math.floor(idx / 3);
@@ -88,7 +100,7 @@ export default function CraftingTable() {
       return slot;
     });
     setCraftingGrid3x3(newGrid);
-  }, [craftingResult3x3, craftingGrid3x3, heldItem, setCraftingGrid3x3, consumeMask]);
+  }, [craftingResult3x3, craftingGrid3x3, heldItem, setCraftingGrid3x3, consumeMask, matchedRecipeId]);
 
   const handleSlotClick = useCallback(
     (index: number, isHotbar: boolean, e: React.MouseEvent) => {
@@ -213,13 +225,38 @@ export default function CraftingTable() {
   // Only show for survival mode crafting UI
   if (gameState !== 'crafting' || gameMode === 'creative') return null;
 
+  const allCraftingRecipes = getAllRecipes();
+  const visibleCraftingRecipes =
+    recipeBookFilter === 'all'
+      ? allCraftingRecipes
+      : allCraftingRecipes.filter((recipe) => isRecipeDiscovered(recipe.id));
+  const searchedCraftingRecipes = visibleCraftingRecipes.filter((recipe) => {
+    const haystack = [
+      recipe.id,
+      getItemName(recipe.result.item),
+      getItemName(recipe.result.item).toLowerCase(),
+      ...Object.values(recipe.ingredients).map((ing) => getItemName(ing)),
+    ]
+      .join(' ')
+      .toLowerCase();
+    return haystack.includes(recipeSearch.trim().toLowerCase());
+  });
+
   return (
     <div
       className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
       onContextMenu={(e) => e.preventDefault()}
     >
-      <div className="bg-gray-800 p-4 rounded-lg">
-        <h2 className="text-white text-center mb-4 text-lg">Crafting Table</h2>
+      <div className="relative bg-gray-800 p-4 rounded-lg min-w-[900px]">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-white text-lg">Crafting Table</h2>
+          <button
+            className="px-3 py-1 rounded bg-amber-700 hover:bg-amber-600 text-white text-sm font-semibold"
+            onClick={() => setShowRecipeBook((v) => !v)}
+          >
+            Book
+          </button>
+        </div>
 
         {/* Crafting area */}
         <div className="flex justify-center gap-8 mb-6">
@@ -256,11 +293,69 @@ export default function CraftingTable() {
             <SlotButton key={`hot-${i}`} slot={slot} onClick={(e) => handleSlotClick(i, true, e)} />
           ))}
         </div>
-      </div>
+        </div>
 
-      {/* Held item following cursor */}
-      {heldItem.item !== null && (
-        <div
+        {showRecipeBook && (
+          <div className="absolute top-0 right-0 translate-x-[calc(100%+12px)] w-[360px] h-full bg-[#1f1b16] border border-amber-900 rounded-lg shadow-2xl overflow-hidden">
+            <div className="flex">
+              <button
+                className={`flex-1 py-2 text-sm font-semibold ${recipeBookTab === 'crafting' ? 'bg-amber-700 text-white' : 'bg-[#2b241d] text-amber-100'}`}
+                onClick={() => setRecipeBookTab('crafting')}
+              >
+                Crafting
+              </button>
+              <button
+                className={`flex-1 py-2 text-sm font-semibold ${recipeBookTab === 'smelting' ? 'bg-amber-700 text-white' : 'bg-[#2b241d] text-amber-100'}`}
+                onClick={() => setRecipeBookTab('smelting')}
+              >
+                Smelting
+              </button>
+            </div>
+            {recipeBookTab === 'crafting' && (
+              <div className="border-b border-amber-900/40 p-2 space-y-2">
+                <input
+                  value={recipeSearch}
+                  onChange={(e) => setRecipeSearch(e.target.value)}
+                  placeholder="Search recipes"
+                  className="w-full px-3 py-2 rounded bg-[#221c16] text-amber-100 text-xs outline-none border border-amber-900/40 focus:border-amber-500"
+                />
+                <div className="flex">
+                <button
+                  className={`flex-1 py-2 text-xs font-semibold ${recipeBookFilter === 'all' ? 'bg-[#3a2f24] text-amber-100' : 'bg-[#221c16] text-amber-200/70'}`}
+                  onClick={() => setRecipeBookFilter('all')}
+                >
+                  All
+                </button>
+                <button
+                  className={`flex-1 py-2 text-xs font-semibold ${recipeBookFilter === 'discovered' ? 'bg-[#3a2f24] text-amber-100' : 'bg-[#221c16] text-amber-200/70'}`}
+                  onClick={() => setRecipeBookFilter('discovered')}
+                >
+                  Discovered
+                </button>
+              </div>
+              </div>
+            )}
+            <div className="p-3 h-[520px] overflow-y-auto space-y-3">
+              <div className="text-[11px] text-amber-200/60 mb-2">
+                {recipeBookTab === 'crafting'
+                  ? `${searchedCraftingRecipes.length} recipes`
+                  : `${SMELTING_RECIPES.length} smelting recipes`}
+              </div>
+              {(recipeBookTab === 'crafting' ? searchedCraftingRecipes : SMELTING_RECIPES).map((recipe: any) => (
+                <RecipeBookEntry
+                  key={recipe.id ?? `${recipe.input}-${recipe.output}`}
+                  recipe={recipe}
+                  mode={recipeBookTab}
+                  discovered={recipeBookTab === 'smelting' ? true : isRecipeDiscovered(recipe.id)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Held item following cursor */}
+        {heldItem.item !== null && (
+          <div
           className="fixed pointer-events-none z-50"
           style={{
             left: mousePos.x - 20,
@@ -301,10 +396,7 @@ function SlotButton({ slot, onClick, isResult }: SlotButtonProps) {
 
 function ItemDisplay({ item, count }: { item: BlockType | ItemType; count: number }) {
   const name = getItemName(item);
-
-  // Use the new item texture generator
-  const itemTexture = itemTextureGenerator.generateItemTexture(item);
-  const canvas = itemTexture.canvas;
+  const src = itemTextureGenerator.getItemImageSrc(item);
 
   return (
     <div className="w-full h-full flex items-center justify-center relative group" title={name}>
@@ -317,7 +409,7 @@ function ItemDisplay({ item, count }: { item: BlockType | ItemType; count: numbe
         }}
       >
         <img
-          src={canvas.toDataURL()}
+          src={src}
           alt={name}
           className="w-full h-full object-cover"
           style={{
@@ -341,6 +433,40 @@ function ItemDisplay({ item, count }: { item: BlockType | ItemType; count: numbe
             Break time: {(BLOCKS[item] as any).breakTime}s
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function RecipeBookEntry({ recipe, mode, discovered }: { recipe: any; mode: 'crafting' | 'smelting'; discovered: boolean }) {
+  if (mode === 'smelting') {
+    return (
+      <div className="p-2 rounded bg-black/20 border border-amber-900/40">
+        <div className="text-amber-100 text-sm font-semibold mb-2">{getItemName(recipe.input)} → {getItemName(recipe.output)}</div>
+        <div className="text-xs text-amber-200/70">Cook time: {recipe.cookTime}s</div>
+      </div>
+    );
+  }
+
+  const pattern = recipe.pattern as (string | null)[][];
+  return (
+    <div className={`p-2 rounded border ${discovered ? 'bg-black/20 border-amber-900/40' : 'bg-black/10 border-amber-900/20 opacity-70'}`}>
+      <div className="text-amber-100 text-sm font-semibold mb-2 flex items-center justify-between">
+        <span>{getItemName(recipe.result.item)}</span>
+        <span className="flex items-center gap-2">
+          {!discovered && <span className="text-[10px] uppercase tracking-widest text-amber-300/70">New</span>}
+          <span className="text-amber-200/70 text-xs">x{recipe.result.count}</span>
+        </span>
+      </div>
+      <div className="grid gap-1 mb-2" style={{ gridTemplateColumns: `repeat(${Math.max(...pattern.map((row) => row.length))}, 22px)` }}>
+        {pattern.flatMap((row, y) => row.map((cell, x) => (
+          <div key={`${y}-${x}`} className="w-[22px] h-[22px] rounded border border-amber-900/60 bg-[#3b3228] text-[9px] text-center leading-[22px] text-amber-100">
+            {cell ? cell : ' '}
+          </div>
+        )))}
+      </div>
+      <div className="text-xs text-amber-200/70">
+        {pattern.map((row) => row.map((cell) => (cell ? recipe.ingredients[cell] : null)).filter(Boolean).map((ing) => getItemName(ing as any)).join(', '))}
       </div>
     </div>
   );

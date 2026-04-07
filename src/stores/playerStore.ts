@@ -12,7 +12,10 @@ import {
 
 import { useWorldStore } from '@/stores/worldStore';
 import { useInventoryStore } from '@/stores/inventoryStore';
+import { useGameStore } from '@/stores/gameStore';
+import { getEnchantmentLevel } from '@/data/enchantments';
 import { BlockType } from '@/data/blocks';
+import { findSafeSpawnPosition } from '@/engine/Physics';
 
 export interface PlayerPosition {
   x: number;
@@ -84,6 +87,7 @@ interface PlayerStore {
   setSelectedSlot: (slot: number) => void;
   updateCooldowns: (delta: number) => void;
   addExperience: (amount: number) => void;
+  consumeExperienceLevels: (amount: number) => boolean;
   respawn: () => void;
   getMovementSpeed: () => number;
   getVerticalSpeed: () => number;
@@ -172,13 +176,24 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
 
     // Apply armor reduction (simple version)
     const reduction = Math.min(armor * 0.04, 0.8);
-    const actualDamage = amount * (1 - reduction);
+    const armorSlots = useInventoryStore.getState().armor;
+    const protectionLevel =
+      getEnchantmentLevel(armorSlots.helmet, 'protection') +
+      getEnchantmentLevel(armorSlots.chestplate, 'protection') +
+      getEnchantmentLevel(armorSlots.leggings, 'protection') +
+      getEnchantmentLevel(armorSlots.boots, 'protection');
+    const protectionReduction = Math.min(protectionLevel * 0.03, 0.24);
+    const actualDamage = amount * (1 - reduction) * (1 - protectionReduction);
 
     const newHealth = Math.max(0, health - actualDamage);
     set({
       health: newHealth,
       invulnerabilityTime: 0.5, // 0.5 seconds of invulnerability
     });
+
+    if (newHealth <= 0) {
+      useGameStore.getState().setGameState('dead');
+    }
   },
 
   heal: (amount) => {
@@ -240,78 +255,23 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
     set({ experience, experienceLevel });
   },
 
+  consumeExperienceLevels: (amount) => {
+    if (amount <= 0) return true;
+    const { experienceLevel } = get();
+    if (experienceLevel < amount) return false;
+    set({ experienceLevel: experienceLevel - amount });
+    return true;
+  },
+
   setOxygen: (oxygen: number) => set({ oxygen: Math.max(0, Math.min(300, oxygen)) }),
 
   respawn: () => {
-    // Find a safe spawn position - IMPROVED TO AVOID WATER SPAWNING
-    const worldStore = useWorldStore.getState();
-    let spawnX = 0;
-    let spawnY = 100;
-    let spawnZ = 0;
-    
-    // Search for solid ground in a 30-block radius (wider search for better results)
-    let foundSafeSpawn = false;
-    let bestSpawnY = 100; // Keep track of highest safe spawn
-    
-    for (let searchRadius = 0; searchRadius <= 30 && !foundSafeSpawn; searchRadius++) {
-      for (let offsetX = -searchRadius; offsetX <= searchRadius && !foundSafeSpawn; offsetX++) {
-        for (let offsetZ = -searchRadius; offsetZ <= searchRadius && !foundSafeSpawn; offsetZ++) {
-          // Skip the center if we're not in the first iteration
-          if (searchRadius === 0 && (offsetX !== 0 || offsetZ !== 0)) continue;
-          
-          const checkX = 0 + offsetX;
-          const checkZ = 0 + offsetZ;
-          
-          // Find the highest solid block at this position
-          for (let y = 120; y >= 50; y--) {
-            const block = worldStore.getBlock(checkX, y, checkZ);
-            
-            // Check if this is a solid block (not water, lava, or air)
-            if (block !== BlockType.AIR && block !== BlockType.WATER && block !== BlockType.LAVA) {
-              // Check if the space above is clear for spawning (3 blocks high)
-              const spawnCheckY = y + 3;
-              const blockAbove1 = worldStore.getBlock(checkX, spawnCheckY, checkZ);
-              const blockAbove2 = worldStore.getBlock(checkX, spawnCheckY + 1, checkZ);
-              const blockAbove3 = worldStore.getBlock(checkX, spawnCheckY + 2, checkZ);
-              
-              // Ensure spawn position is clear of water, lava, and solid blocks
-              const isClearSpace = blockAbove1 === BlockType.AIR && 
-                                  blockAbove2 === BlockType.AIR && 
-                                  blockAbove3 === BlockType.AIR;
-              
-              // Check surrounding blocks to avoid spawning near water
-              const surroundingClear = 
-                worldStore.getBlock(checkX - 1, spawnCheckY, checkZ) !== BlockType.WATER &&
-                worldStore.getBlock(checkX + 1, spawnCheckY, checkZ) !== BlockType.WATER &&
-                worldStore.getBlock(checkX, spawnCheckY, checkZ - 1) !== BlockType.WATER &&
-                worldStore.getBlock(checkX, spawnCheckY, checkZ + 1) !== BlockType.WATER;
-              
-              if (isClearSpace && surroundingClear) {
-                spawnX = checkX;
-                spawnY = spawnCheckY;
-                spawnZ = checkZ;
-                foundSafeSpawn = true;
-                
-                // Prefer higher spawn points for better visibility
-                if (spawnCheckY > bestSpawnY) {
-                  bestSpawnY = spawnCheckY;
-                }
-                break;
-              }
-            }
-          }
-        }
-      }
-    }
-    
-    // If no safe spawn found, use default elevated position
-    if (!foundSafeSpawn) {
-      console.warn('No safe spawn position found, using default elevated spawn');
-      spawnY = 120; // Spawn higher to avoid water
-    }
-    
+    // Respawn near the current position so the player returns to the nearest surface.
+    const { position } = get();
+    const spawn = findSafeSpawnPosition(position.x, position.z, 64, true);
+
     set({
-      position: { x: spawnX + 0.5, y: spawnY, z: spawnZ + 0.5 }, // Center in block
+      position: spawn,
       velocity: initialVelocity,
       health: MAX_HEALTH,
       hunger: MAX_HUNGER,
@@ -320,6 +280,7 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
       isInWater: false,
       isInLava: false,
     });
+    useGameStore.getState().setGameState('playing');
   },
 
   getMovementSpeed: () => {

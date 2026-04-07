@@ -1,7 +1,7 @@
 import { useGameStore } from '@/stores/gameStore';
 import { useWorldStore } from '@/stores/worldStore';
 import { optimizedEntityManager } from '@/entities/OptimizedEntityManager';
-import { getOptimizedChunkManager } from '@/engine/OptimizedChunkManager';
+import { getChunkManager } from '@/engine/ChunkManager';
 import { OptimizedMeshBuilder } from '@/engine/OptimizedMeshBuilder';
 
 interface PerformanceMetrics {
@@ -108,8 +108,12 @@ class PerformanceMonitor {
     };
 
     // Generation metrics
-    const chunkManager = getOptimizedChunkManager();
-    const genStats = chunkManager.getGenerationStats();
+    const chunkManager = getChunkManager();
+    const genStats = {
+      queueSize: chunkManager.getQueueSize(),
+      isGenerating: false,
+      budget: 0,
+    };
     this.metrics.generationStats = genStats;
 
     // Mesh cache metrics
@@ -268,13 +272,20 @@ export const performanceMonitor = new PerformanceMonitor();
 
 // Performance utilities
 export class PerformanceUtils {
+  private static shouldLog(): boolean {
+    if (typeof window === 'undefined') return false;
+    return process.env.NODE_ENV !== 'production' || localStorage.getItem('minecraft_profiling') === '1';
+  }
+
   // Measure function execution time
   static measureFunction<T>(fn: () => T, label: string): T {
     const start = performance.now();
     const result = fn();
     const end = performance.now();
-    
-    console.log(`${label}: ${(end - start).toFixed(2)}ms`);
+
+    if (PerformanceUtils.shouldLog()) {
+      console.log(`${label}: ${(end - start).toFixed(2)}ms`);
+    }
     return result;
   }
 
@@ -283,8 +294,10 @@ export class PerformanceUtils {
     const start = performance.now();
     const result = await fn();
     const end = performance.now();
-    
-    console.log(`${label}: ${(end - start).toFixed(2)}ms`);
+
+    if (PerformanceUtils.shouldLog()) {
+      console.log(`${label}: ${(end - start).toFixed(2)}ms`);
+    }
     return result;
   }
 

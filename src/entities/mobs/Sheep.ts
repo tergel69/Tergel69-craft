@@ -1,5 +1,6 @@
 import { Mob } from '../Mob';
 import { BlockType } from '@/data/blocks';
+import { ItemType } from '@/data/items';
 
 type WoolColor = 'white' | 'black' | 'brown' | 'gray' | 'light_gray' | 'pink' | 'red' | 'blue' | 'green' | 'yellow' | 'orange' | 'magenta' | 'light_blue' | 'lime' | 'cyan' | 'purple';
 
@@ -97,7 +98,7 @@ export class Sheep extends Mob {
     // Drop wool based on color
     this.drops = [
       { item: this.getWoolBlock(), count: [1, 1], chance: 1 },
-      { item: 'raw_mutton', count: [1, 2], chance: 1 },
+      { item: ItemType.RAW_MUTTON, count: [1, 2], chance: 1 },
     ];
     super.onDeath();
   }

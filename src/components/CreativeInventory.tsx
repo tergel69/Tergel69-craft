@@ -225,9 +225,6 @@ export default function CreativeInventory() {
               const itemName = activeTab === 'blocks'
                 ? (item as typeof BLOCKS[BlockType]).name
                 : (item as typeof ITEMS[ItemType]).name;
-              const itemColor = activeTab === 'blocks'
-                ? (item as typeof BLOCKS[BlockType]).color
-                : (item as typeof ITEMS[ItemType]).color;
 
               return (
                 <button
@@ -242,8 +239,6 @@ export default function CreativeInventory() {
                 >
                   <CreativeItemDisplay
                     item={itemId}
-                    color={itemColor}
-                    isBlock={activeTab === 'blocks'}
                   />
                   {/* Tooltip */}
                   <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-black/90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
@@ -306,34 +301,25 @@ export default function CreativeInventory() {
 
 function CreativeItemDisplay({
   item,
-  color,
-  isBlock
 }: {
   item: BlockType | ItemType;
-  color: string;
-  isBlock: boolean;
 }) {
-  if (isBlock && typeof item === 'number') {
-    const block = BLOCKS[item];
-    return (
-      <div
-        className="w-7 h-7 m-auto border border-black/30"
-        style={{
-          background: `linear-gradient(135deg, ${block?.colorTop || color} 0%, ${color} 50%, ${block?.colorBottom || color} 100%)`,
-          boxShadow: 'inset 2px 2px 0 rgba(255,255,255,0.3), inset -2px -2px 0 rgba(0,0,0,0.3)',
-        }}
-      />
-    );
-  }
-
+  const src = itemTextureGenerator.getItemImageSrc(item);
   return (
     <div
-      className="w-7 h-7 m-auto rounded-sm"
+      className="w-7 h-7 m-auto border border-black/30 overflow-hidden"
       style={{
-        backgroundColor: color,
+        borderRadius: '2px',
         boxShadow: 'inset 2px 2px 0 rgba(255,255,255,0.3), inset -2px -2px 0 rgba(0,0,0,0.3)',
       }}
-    />
+    >
+      <img
+        src={src}
+        alt=""
+        className="w-full h-full object-cover"
+        style={{ imageRendering: 'pixelated' }}
+      />
+    </div>
   );
 }
 
@@ -341,8 +327,7 @@ function ItemDisplay({ item, count }: { item: BlockType | ItemType; count: numbe
   const name = getItemName(item);
 
   // Use the new item texture generator
-  const itemTexture = itemTextureGenerator.generateItemTexture(item);
-  const canvas = itemTexture.canvas;
+  const src = itemTextureGenerator.getItemImageSrc(item);
 
   return (
     <div className="w-full h-full flex items-center justify-center relative group" title={name}>
@@ -355,7 +340,7 @@ function ItemDisplay({ item, count }: { item: BlockType | ItemType; count: numbe
         }}
       >
         <img
-          src={canvas.toDataURL()}
+          src={src}
           alt={name}
           className="w-full h-full object-cover"
           style={{

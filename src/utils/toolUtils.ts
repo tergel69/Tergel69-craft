@@ -1,5 +1,6 @@
 import { BlockType, BLOCKS, BlockData } from '@/data/blocks';
 import { ItemType, ITEMS, ItemData } from '@/data/items';
+import { getEnchantmentLevel, EnchantableSlot } from '@/data/enchantments';
 
 // Tool levels: 0 = wood, 1 = stone, 2 = iron, 3 = gold, 4 = diamond, 5 = netherite
 // Block harvest levels for ores
@@ -33,6 +34,29 @@ const BASE_BREAK_TIME = 1.5;
 
 // Speed multiplier when not using correct tool
 const WRONG_TOOL_PENALTY = 5;
+
+const FORTUNE_ELIGIBLE_BLOCKS = new Set<BlockType>([
+  BlockType.COAL_ORE,
+  BlockType.DEEPSLATE_COAL_ORE,
+  BlockType.IRON_ORE,
+  BlockType.DEEPSLATE_IRON_ORE,
+  BlockType.COPPER_ORE,
+  BlockType.DEEPSLATE_COPPER_ORE,
+  BlockType.GOLD_ORE,
+  BlockType.DEEPSLATE_GOLD_ORE,
+  BlockType.REDSTONE_ORE,
+  BlockType.DEEPSLATE_REDSTONE_ORE,
+  BlockType.DIAMOND_ORE,
+  BlockType.DEEPSLATE_DIAMOND_ORE,
+  BlockType.EMERALD_ORE,
+  BlockType.DEEPSLATE_EMERALD_ORE,
+  BlockType.LAPIS_ORE,
+  BlockType.DEEPSLATE_LAPIS_ORE,
+]);
+
+function isEnchantableSlot(value: unknown): value is EnchantableSlot {
+  return !!value && typeof value === 'object' && 'item' in value;
+}
 
 export interface ToolInfo {
   toolType: 'pickaxe' | 'shovel' | 'axe' | 'hoe' | 'sword' | 'shears' | null;
@@ -69,9 +93,14 @@ export function getToolInfo(item: BlockType | ItemType | null | undefined): Tool
 /**
  * Check if a tool can harvest a block (get drops)
  */
-export function canHarvest(block: BlockType, item: BlockType | ItemType | null | undefined): boolean {
+export function canHarvest(
+  block: BlockType,
+  item: BlockType | ItemType | EnchantableSlot | null | undefined
+): boolean {
   const blockData = BLOCKS[block];
   if (!blockData) return false;
+
+  const actualItem = isEnchantableSlot(item) ? item.item : item;
 
   // Blocks without tool requirements can be harvested with anything
   if (!blockData.tool) return true;
@@ -81,7 +110,7 @@ export function canHarvest(block: BlockType, item: BlockType | ItemType | null |
   if (requiredLevel === undefined) return true;
 
   // Get tool info
-  const toolInfo = getToolInfo(item);
+  const toolInfo = getToolInfo(actualItem);
   if (!toolInfo) return requiredLevel === 0;
 
   // Check if it's the correct tool type
@@ -163,7 +192,7 @@ export function calculateBreakTime(
  */
 export function getBlockDrop(
   block: BlockType,
-  item: BlockType | ItemType | null | undefined
+  item: BlockType | ItemType | EnchantableSlot | null | undefined
 ): { item: BlockType | ItemType; count: number }[] {
   const blockData = BLOCKS[block];
   if (!blockData) return [];
@@ -192,6 +221,10 @@ export function getBlockDrop(
   // Check for custom drops
   if (blockData.drops && blockData.drops.length > 0) {
     const drops: { item: BlockType | ItemType; count: number }[] = [];
+  const fortuneLevel =
+      isEnchantableSlot(item)
+        ? getEnchantmentLevel(item, 'fortune')
+        : 0;
 
     for (const drop of blockData.drops) {
       // Check chance
@@ -203,9 +236,17 @@ export function getBlockDrop(
       if (typeof drop.item === 'string') {
         // Convert string to ItemType if possible
         const itemType = drop.item as ItemType;
-        drops.push({ item: itemType, count: drop.count });
+        const count =
+          fortuneLevel > 0 && FORTUNE_ELIGIBLE_BLOCKS.has(block)
+            ? drop.count * (1 + Math.floor(Math.random() * (fortuneLevel + 1)))
+            : drop.count;
+        drops.push({ item: itemType, count });
       } else {
-        drops.push({ item: drop.item as BlockType, count: drop.count });
+        const count =
+          fortuneLevel > 0 && FORTUNE_ELIGIBLE_BLOCKS.has(block)
+            ? drop.count * (1 + Math.floor(Math.random() * (fortuneLevel + 1)))
+            : drop.count;
+        drops.push({ item: drop.item as BlockType, count });
       }
     }
 

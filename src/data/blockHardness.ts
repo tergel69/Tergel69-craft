@@ -32,6 +32,7 @@ const BREAK_TIMES: Partial<Record<number, number>> = {
 
   // ── Fast (wood / plants) ───────────────────────────────────────────────────
   [BlockType.OAK_LEAVES]:    0.35,
+  [BlockType.CHERRY_LEAVES]: 0.35,
   [BlockType.BIRCH_LEAVES]:  0.35,
   [BlockType.JUNGLE_LEAVES]: 0.35,
   [BlockType.SPRUCE_LEAVES]: 0.35,
@@ -45,6 +46,7 @@ const BREAK_TIMES: Partial<Record<number, number>> = {
   [BlockType.PUMPKIN]:       1.0,
   [BlockType.MELON]:         1.0,
   [BlockType.CACTUS]:        0.4,
+  [BlockType.DEAD_BUSH]:     0.05,
   [BlockType.SUGAR_CANE]:    0.05,
   [BlockType.SPONGE]:        0.9,
   [BlockType.WET_SPONGE]:    0.9,
@@ -57,6 +59,7 @@ const BREAK_TIMES: Partial<Record<number, number>> = {
 
   // ── Medium (wood logs & planks) ────────────────────────────────────────────
   [BlockType.OAK_LOG]:       2.0,
+  [BlockType.CHERRY_LOG]:    2.0,
   [BlockType.BIRCH_LOG]:     2.0,
   [BlockType.JUNGLE_LOG]:    2.0,
   [BlockType.SPRUCE_LOG]:    2.0,

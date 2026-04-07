@@ -1,489 +1,478 @@
 import * as THREE from 'three';
-import { MemoryManager } from '@/utils/MemoryManager';
+// Assuming MemoryManager exists as per your import structure
+import { MemoryManager } from '@/utils/MemoryManager'; 
 
-// Optimized shader system with alpha testing and performance optimizations
+/**
+ * Optimized Shader System
+ * 
+ * Consolidates all shader logic into a single, robust system.
+ * Supports Vertex Colors, Texture Atlas, and Custom Effects.
+ */
 export class OptimizedShaderSystem {
   private static instance: OptimizedShaderSystem;
   
-  // Shader cache
-  private shaderCache: Map<string, THREE.ShaderMaterial> = new Map();
   private materialCache: Map<string, THREE.Material> = new Map();
+  private shaderConfigs: Map<string, IShaderConfig> = new Map();
   
-  // Shader configurations
-  private shaderConfigs: Map<string, any> = new Map();
-  
-  // Performance settings
-  private enableAlphaTest: boolean = true;
-  private alphaTestThreshold: number = 0.5;
-  private enableFrustumCulling: boolean = true;
-  private maxLights: number = 4;
-  
+  // Global shader settings
+  private settings = {
+    fogColor: new THREE.Color(0x87CEEB),
+    fogNear: 50,
+    fogFar: 200,
+    sunDirection: new THREE.Vector3(0.5, 1.0, 0.3).normalize(),
+    sunIntensity: 1.2,
+    ambientIntensity: 0.4
+  };
+
   private constructor() {
     this.initializeShaderConfigs();
   }
   
-  static getInstance(): OptimizedShaderSystem {
+  public static getInstance(): OptimizedShaderSystem {
     if (!OptimizedShaderSystem.instance) {
       OptimizedShaderSystem.instance = new OptimizedShaderSystem();
     }
     return OptimizedShaderSystem.instance;
   }
-  
+
+  /**
+   * Defines the GLSL shaders with improved lighting and structure.
+   */
   private initializeShaderConfigs(): void {
-    // Block shader with alpha testing
+    
+    // Common GLSL chunks to avoid code repetition
+    const commonVertexHeader = `
+      attribute vec3 color; // Three.js vertex colors
+      varying vec3 vColor;
+      varying vec3 vWorldPosition;
+      varying vec3 vNormal;
+      varying vec2 vUv;
+      varying float vFogDepth;
+    `;
+
+    const commonVertexMain = `
+      void main() {
+        vColor = color;
+        vUv = uv;
+        vNormal = normalize(normalMatrix * normal);
+        
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        
+        vec4 mvPosition = viewMatrix * worldPosition;
+        vFogDepth = -mvPosition.z; // Linear fog depth
+        
+        gl_Position = projectionMatrix * mvPosition;
+      }
+    `;
+
+    const commonFragmentHeader = `
+      uniform vec3 uSunDirection;
+      uniform vec3 uSunColor;
+      uniform float uSunIntensity;
+      uniform float uAmbientIntensity;
+      uniform vec3 uFogColor;
+      uniform float uFogNear;
+      uniform float uFogFar;
+      uniform float uTime;
+
+      varying vec3 vColor;
+      varying vec3 vWorldPosition;
+      varying vec3 vNormal;
+      varying vec2 vUv;
+      varying float vFogDepth;
+      
+      // Simple noise function for water/foliage
+      float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    `;
+
+    const applyFogChunk = `
+      vec3 applyFog(vec3 color) {
+        float fogFactor = smoothstep(uFogNear, uFogFar, vFogDepth);
+        return mix(color, uFogColor, fogFactor);
+      }
+    `;
+
+    const lightingChunk = `
+      vec3 calculateLight(vec3 normal, vec3 baseColor, float roughness) {
+        // Directional Sun Light
+        float NdotL = max(dot(normal, uSunDirection), 0.0);
+        vec3 diffuse = uSunColor * NdotL * uSunIntensity;
+        
+        // Simple Ambient
+        vec3 ambient = vec3(1.0) * uAmbientIntensity;
+        
+        // Fake Indirect Diffuse (bottom darker, top lighter)
+        float hemisphere = dot(normal, vec3(0.0, 1.0, 0.0)) * 0.5 + 0.5;
+        ambient *= mix(vec3(0.6, 0.6, 0.7), vec3(1.0), hemisphere);
+        
+        return baseColor * (diffuse + ambient);
+      }
+    `;
+
+    // 1. SOLID BLOCK SHADER
     this.shaderConfigs.set('block', {
       uniforms: {
-        time: { value: 0 },
-        lightIntensity: { value: 1.0 },
-        fogColor: { value: new THREE.Color(0x87CEEB) },
-        fogNear: { value: 10 },
-        fogFar: { value: 100 }
+        uTime: { value: 0 },
+        uSunDirection: { value: this.settings.sunDirection },
+        uSunColor: { value: new THREE.Color(1.0, 0.98, 0.95) },
+        uSunIntensity: { value: this.settings.sunIntensity },
+        uAmbientIntensity: { value: this.settings.ambientIntensity },
+        uFogColor: { value: this.settings.fogColor },
+        uFogNear: { value: this.settings.fogNear },
+        uFogFar: { value: this.settings.fogFar },
+        map: { value: null } // Texture placeholder
       },
       vertexShader: `
-        varying vec3 vWorldPosition;
-        varying vec3 vNormal;
-        varying vec2 vUv;
-        varying float vFogDepth;
-        
-        uniform float time;
-        
-        void main() {
-          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
-          vNormal = normalize(normalMatrix * normal);
-          vUv = uv;
-          
-          // Fog calculation
-          vFogDepth = length(mvPosition.xyz);
-          
-          gl_Position = projectionMatrix * mvPosition;
-        }
+        ${commonVertexHeader}
+        ${commonVertexMain}
       `,
       fragmentShader: `
-        uniform vec3 lightIntensity;
-        uniform vec3 fogColor;
-        uniform float fogNear;
-        uniform float fogFar;
+        ${commonFragmentHeader}
+        uniform sampler2D map;
         
-        varying vec3 vWorldPosition;
-        varying vec3 vNormal;
-        varying vec2 vUv;
-        varying float vFogDepth;
+        ${lightingChunk}
+        ${applyFogChunk}
         
         void main() {
-          // Base color from vertex colors
-          vec3 color = gl_FrontFacing ? gl_FragColor.rgb : gl_FragColor.rgb * 0.8;
+          vec4 texColor = texture2D(map, vUv);
+          if(texColor.a < 0.1) discard;
           
-          // Simple lighting
-          float lightFactor = max(dot(vNormal, normalize(vec3(1.0, 1.0, 1.0))), 0.3);
-          color *= lightFactor * lightIntensity;
+          // Multiply texture by vertex color (AO, biome tint)
+          vec3 color = texColor.rgb * vColor;
           
-          // Fog
-          float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);
-          color = mix(color, fogColor, fogFactor);
+          // Apply lighting
+          color = calculateLight(normalize(vNormal), color, 1.0);
+          
+          // Apply Fog
+          color = applyFog(color);
           
           gl_FragColor = vec4(color, 1.0);
         }
       `
     });
-    
-    // Transparent block shader with alpha testing
+
+    // 2. TRANSPARENT / CUTOUT SHADER (Leaves, Glass panes)
     this.shaderConfigs.set('transparent', {
       uniforms: {
-        time: { value: 0 },
-        lightIntensity: { value: 1.0 },
-        alphaTestThreshold: { value: this.alphaTestThreshold },
-        fogColor: { value: new THREE.Color(0x87CEEB) },
-        fogNear: { value: 10 },
-        fogFar: { value: 100 }
+        uTime: { value: 0 },
+        uSunDirection: { value: this.settings.sunDirection },
+        uSunColor: { value: new THREE.Color(1.0, 0.98, 0.95) },
+        uSunIntensity: { value: this.settings.sunIntensity },
+        uAmbientIntensity: { value: this.settings.ambientIntensity },
+        uFogColor: { value: this.settings.fogColor },
+        uFogNear: { value: this.settings.fogNear },
+        uFogFar: { value: this.settings.fogFar },
+        map: { value: null },
+        uAlphaTest: { value: 0.5 }
       },
       vertexShader: `
-        varying vec3 vWorldPosition;
-        varying vec3 vNormal;
-        varying vec2 vUv;
-        varying float vFogDepth;
+        ${commonVertexHeader}
+        ${commonVertexMain}
+      `,
+      fragmentShader: `
+        ${commonFragmentHeader}
+        uniform sampler2D map;
+        uniform float uAlphaTest;
+        
+        ${lightingChunk}
+        ${applyFogChunk}
         
         void main() {
-          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
-          vNormal = normalize(normalMatrix * normal);
-          vUv = uv;
+          vec4 texColor = texture2D(map, vUv);
           
-          vFogDepth = length(mvPosition.xyz);
+          // Alpha Testing
+          if(texColor.a < uAlphaTest) discard;
           
-          gl_Position = projectionMatrix * mvPosition;
+          vec3 color = texColor.rgb * vColor;
+          color = calculateLight(normalize(vNormal), color, 1.0);
+          color = applyFog(color);
+          
+          gl_FragColor = vec4(color, texColor.a);
         }
       `,
-        fragmentShader: `
-        uniform vec3 lightIntensity;
-        uniform float alphaTestThreshold;
-        uniform vec3 fogColor;
-        uniform float fogNear;
-        uniform float fogFar;
-        
-        varying vec3 vWorldPosition;
-        varying vec3 vNormal;
-        varying vec2 vUv;
-        varying float vFogDepth;
-        
-        void main() {
-          vec3 color = gl_FrontFacing ? gl_FragColor.rgb : gl_FragColor.rgb * 0.8;
-          
-          // Alpha testing for performance
-          if (gl_FragColor.a < alphaTestThreshold) {
-            discard;
-          }
-          
-          // Proper lighting calculation with normalized normals
-          vec3 normalizedNormal = normalize(vNormal);
-          float lightFactor = max(dot(normalizedNormal, normalize(vec3(1.0, 1.0, 1.0))), 0.3);
-          color *= lightFactor * lightIntensity;
-          
-          float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);
-          color = mix(color, fogColor, fogFactor);
-          
-          gl_FragColor = vec4(color, gl_FragColor.a);
-        }
-      `,
-      transparent: true
+      transparent: false, // Alpha test usually doesn't need blending
+      side: THREE.DoubleSide
     });
-    
-    // Water shader with optimized transparency
+
+    // 3. WATER SHADER (Dynamic, Reflective, Transparent)
     this.shaderConfigs.set('water', {
       uniforms: {
-        time: { value: 0 },
-        lightIntensity: { value: 1.0 },
-        waveSpeed: { value: 0.5 },
-        waveHeight: { value: 0.1 },
-        fogColor: { value: new THREE.Color(0x87CEEB) },
-        fogNear: { value: 10 },
-        fogFar: { value: 100 }
+        uTime: { value: 0 },
+        uSunDirection: { value: this.settings.sunDirection },
+        uSunColor: { value: new THREE.Color(1.0, 0.98, 0.95) },
+        uSunIntensity: { value: this.settings.sunIntensity },
+        uAmbientIntensity: { value: this.settings.ambientIntensity },
+        uFogColor: { value: this.settings.fogColor },
+        uFogNear: { value: this.settings.fogNear },
+        uFogFar: { value: this.settings.fogFar },
+        uWaterColor: { value: new THREE.Color(0x006994) },
+        uWaterDeepColor: { value: new THREE.Color(0x003366) }
       },
       vertexShader: `
-        varying vec3 vWorldPosition;
-        varying vec3 vNormal;
-        varying vec2 vUv;
-        varying float vFogDepth;
+        ${commonVertexHeader}
+        uniform float uTime;
         
         void main() {
-          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
-          vNormal = normalize(normalMatrix * normal);
+          vColor = color;
           vUv = uv;
           
-          vFogDepth = length(mvPosition.xyz);
+          // Simple wave displacement
+          vec3 pos = position;
+          float wave = sin(pos.x * 2.0 + uTime * 2.0) * 0.05;
+          wave += sin(pos.z * 3.0 + uTime * 1.5) * 0.03;
+          pos.y += wave;
+          
+          vNormal = normalize(normalMatrix * normal); // Recalculate normal for lighting would be better, but approximating here
+          vWorldPosition = (modelMatrix * vec4(pos, 1.0)).xyz;
+          vec4 mvPosition = viewMatrix * vec4(vWorldPosition, 1.0);
+          vFogDepth = -mvPosition.z;
           
           gl_Position = projectionMatrix * mvPosition;
         }
       `,
       fragmentShader: `
-        uniform float time;
-        uniform vec3 lightIntensity;
-        uniform float waveSpeed;
-        uniform float waveHeight;
-        uniform vec3 fogColor;
-        uniform float fogNear;
-        uniform float fogFar;
+        ${commonFragmentHeader}
+        uniform vec3 uWaterColor;
+        uniform vec3 uWaterDeepColor;
         
-        varying vec3 vWorldPosition;
-        varying vec3 vNormal;
-        varying vec2 vUv;
-        varying float vFogDepth;
+        ${applyFogChunk}
         
         void main() {
-          // Animated water effect
-          vec2 waveUv = vUv + sin(time * waveSpeed + vWorldPosition.x * 0.1) * waveHeight;
-          float wave = sin(waveUv.x * 10.0) * cos(waveUv.y * 10.0) * 0.1;
+          // Procedural normals for waves
+          float time = uTime * 0.5;
+          vec2 uv1 = vUv * 3.0 + time;
+          float n1 = hash(uv1);
+          vec2 uv2 = vUv * 5.0 - time * 0.5;
+          float n2 = hash(uv2);
+          float waveN = (n1 + n2) / 2.0 - 0.5; // -0.5 to 0.5
           
-          vec3 waterColor = vec3(0.1, 0.3, 0.8);
-          waterColor += wave * 0.2;
+          vec3 normal = normalize(vNormal + vec3(waveN, 0.0, waveN));
           
-          float lightFactor = max(dot(vNormal, normalize(vec3(1.0, 1.0, 1.0))), 0.3);
-          waterColor *= lightFactor * lightIntensity;
+          // Fresnel effect (more reflective at angles)
+          vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+          float fresnel = pow(1.0 - max(dot(viewDir, normal), 0.0), 3.0);
           
-          float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);
-          waterColor = mix(waterColor, fogColor, fogFactor);
+          // Lighting
+          float NdotL = max(dot(normal, uSunDirection), 0.0);
           
-          gl_FragColor = vec4(waterColor, 0.7);
-        }
-      `,
-      transparent: true
-    });
-    
-    // Foliage shader with alpha testing
-    this.shaderConfigs.set('foliage', {
-      uniforms: {
-        time: { value: 0 },
-        lightIntensity: { value: 1.0 },
-        alphaTestThreshold: { value: 0.3 },
-        windStrength: { value: 0.1 },
-        fogColor: { value: new THREE.Color(0x87CEEB) },
-        fogNear: { value: 10 },
-        fogFar: { value: 100 }
-      },
-      vertexShader: `
-        varying vec3 vWorldPosition;
-        varying vec3 vNormal;
-        varying vec2 vUv;
-        varying float vFogDepth;
-        
-        void main() {
-          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
-          vNormal = normalize(normalMatrix * normal);
-          vUv = uv;
+          // Specular (Sun reflection)
+          vec3 reflectDir = reflect(-uSunDirection, normal);
+          float spec = pow(max(dot(viewDir, reflectDir), 0.0), 64.0);
           
-          vFogDepth = length(mvPosition.xyz);
+          // Depth color mixing
+          vec3 color = mix(uWaterColor, uWaterDeepColor, 0.5 + fresnel);
+          color += vec3(1.0, 0.95, 0.8) * spec * 2.0; // Specular highlight
+          color = mix(color, uFogColor, fresnel * 0.4); // Reflection of sky/fog
           
-          gl_Position = projectionMatrix * mvPosition;
-        }
-      `,
-      fragmentShader: `
-        uniform float time;
-        uniform vec3 lightIntensity;
-        uniform float alphaTestThreshold;
-        uniform float windStrength;
-        uniform vec3 fogColor;
-        uniform float fogNear;
-        uniform float fogFar;
-        
-        varying vec3 vWorldPosition;
-        varying vec3 vNormal;
-        varying vec2 vUv;
-        varying float vFogDepth;
-        
-        void main() {
-          // Wind animation
-          float wind = sin(time + vWorldPosition.x * 0.1) * windStrength;
-          vec2 animatedUv = vUv + vec2(wind * 0.1, 0.0);
+          // Fog
+          color = applyFog(color);
           
-          // Alpha testing for foliage
-          float alpha = gl_FragColor.a;
-          if (alpha < alphaTestThreshold) {
-            discard;
-          }
-          
-          vec3 color = gl_FragColor.rgb;
-          
-          // Slight color variation
-          color += sin(animatedUv.x * 20.0) * 0.05;
-          color += cos(animatedUv.y * 20.0) * 0.05;
-          
-          float lightFactor = max(dot(vNormal, normalize(vec3(1.0, 1.0, 1.0))), 0.3);
-          color *= lightFactor * lightIntensity;
-          
-          float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);
-          color = mix(color, fogColor, fogFactor);
+          // Transparency logic: clearer when looking straight down
+          float alpha = 0.6 + fresnel * 0.3;
           
           gl_FragColor = vec4(color, alpha);
         }
       `,
-      transparent: true
+      transparent: true,
+      side: THREE.DoubleSide
+    });
+
+    // 4. FOLIAGE SHADER (Windy, SSS)
+    this.shaderConfigs.set('foliage', {
+      uniforms: {
+        uTime: { value: 0 },
+        uSunDirection: { value: this.settings.sunDirection },
+        uSunColor: { value: new THREE.Color(1.0, 0.98, 0.95) },
+        uSunIntensity: { value: this.settings.sunIntensity },
+        uAmbientIntensity: { value: this.settings.ambientIntensity },
+        uFogColor: { value: this.settings.fogColor },
+        uFogNear: { value: this.settings.fogNear },
+        uFogFar: { value: this.settings.fogFar },
+        map: { value: null },
+        uWindStrength: { value: 0.2 }
+      },
+      vertexShader: `
+        ${commonVertexHeader}
+        uniform float uTime;
+        uniform float uWindStrength;
+        
+        void main() {
+          vColor = color;
+          vUv = uv;
+          
+          // Wind Animation
+          vec3 pos = position;
+          float wind = sin(uTime * 2.0 + pos.x * 2.0 + pos.z * 2.0) * uWindStrength;
+          // Top vertices move more than bottom
+          wind *= uv.y; 
+          pos.x += wind;
+          pos.z += wind * 0.5;
+          
+          vNormal = normalize(normalMatrix * normal);
+          vWorldPosition = (modelMatrix * vec4(pos, 1.0)).xyz;
+          vec4 mvPosition = viewMatrix * vec4(vWorldPosition, 1.0);
+          vFogDepth = -mvPosition.z;
+          
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        ${commonFragmentHeader}
+        uniform sampler2D map;
+        
+        ${lightingChunk}
+        ${applyFogChunk}
+        
+        void main() {
+          vec4 texColor = texture2D(map, vUv);
+          if(texColor.a < 0.5) discard;
+          
+          vec3 color = texColor.rgb * vColor;
+          vec3 normal = normalize(vNormal);
+          
+          // Subsurface Scattering Approximation (Rim Light)
+          // Light passing through the leaf
+          vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+          float rim = 1.0 - max(dot(viewDir, normal), 0.0);
+          vec3 subsurface = uSunColor * pow(rim, 2.0) * 0.5 * uSunIntensity;
+          
+          // Standard Light
+          float NdotL = max(dot(normal, uSunDirection), 0.0);
+          vec3 diffuse = color * NdotL * uSunIntensity;
+          
+          // Ambient
+          vec3 ambient = color * uAmbientIntensity * 0.6;
+          
+          color = diffuse + ambient + subsurface * color; // Tint subsurface by leaf color
+          
+          color = applyFog(color);
+          
+          gl_FragColor = vec4(color, 1.0);
+        }
+      `,
+      transparent: false,
+      side: THREE.DoubleSide
     });
   }
-  
-  // Get or create shader material
-  getMaterial(type: string, options: any = {}): THREE.Material {
-    const cacheKey = `${type}_${JSON.stringify(options)}`;
+
+  /**
+   * Creates or retrieves a material from the cache.
+   */
+  // Change the return type to THREE.Material to allow for fallbacks
+  public getMaterial(type: string, texture?: THREE.Texture): THREE.Material {
+    // Use texture UUID for caching if texture is provided
+    const cacheKey = texture ? `${type}_${texture.uuid}` : type;
     
     if (this.materialCache.has(cacheKey)) {
       return this.materialCache.get(cacheKey)!;
     }
-    
+
     const config = this.shaderConfigs.get(type);
+    
+    // Fallback: Return a standard material if no shader config is found
     if (!config) {
-      // Fallback to basic material
-      return new THREE.MeshLambertMaterial(options);
-    }
-    
-    let material: THREE.Material;
-    
-    if (config.transparent) {
-      material = new THREE.ShaderMaterial({
-        uniforms: THREE.UniformsUtils.clone(config.uniforms),
-        vertexShader: config.vertexShader,
-        fragmentShader: config.fragmentShader,
-        transparent: true,
-        alphaTest: this.enableAlphaTest ? 0.5 : undefined,
-        side: THREE.DoubleSide,
-        vertexColors: true
+      console.warn(`Shader config for "${type}" not found. Creating MeshStandardMaterial fallback.`);
+      
+      // This returns a MeshStandardMaterial, which is valid because the method returns THREE.Material
+      const fallbackMat = new THREE.MeshStandardMaterial({ 
+        map: texture,
+        vertexColors: true 
       });
-    } else {
-      material = new THREE.ShaderMaterial({
-        uniforms: THREE.UniformsUtils.clone(config.uniforms),
-        vertexShader: config.vertexShader,
-        fragmentShader: config.fragmentShader,
-        transparent: false,
-        side: THREE.FrontSide,
-        vertexColors: true
-      });
+      
+      this.materialCache.set(cacheKey, fallbackMat);
+      return fallbackMat;
     }
-    
-    // Apply options
-    Object.assign(material, options);
-    
+
+    // Standard ShaderMaterial creation
+    const material = new THREE.ShaderMaterial({
+      uniforms: THREE.UniformsUtils.clone(config.uniforms),
+      vertexShader: config.vertexShader,
+      fragmentShader: config.fragmentShader,
+      transparent: config.transparent || false,
+      side: config.side || THREE.FrontSide,
+      vertexColors: true,
+      // alphaTest is usually handled inside the shader logic now, 
+      // but you can set it here if needed for internal optimizations.
+    });
+
+    if (texture) {
+      material.uniforms.map = { value: texture };
+    }
+
     this.materialCache.set(cacheKey, material);
     return material;
   }
-  
-  // Update shader uniforms
-  updateShaders(time: number): void {
-    for (const material of this.materialCache.values()) {
-      if (material instanceof THREE.ShaderMaterial) {
-        if (material.uniforms.time) {
-          material.uniforms.time.value = time;
-        }
+
+  /**
+   * Updates global uniforms for all cached materials (Time, Lighting, Fog).
+   */
+  public updateGlobalUniforms(time: number, camera: THREE.Camera): void {
+    // Update Time
+    for (const [, material] of this.materialCache) {
+      if (material instanceof THREE.ShaderMaterial && material.uniforms.uTime) {
+        material.uniforms.uTime.value = time;
       }
     }
-  }
-  
-  // Performance settings
-  setAlphaTest(enabled: boolean, threshold: number = 0.5): void {
-    this.enableAlphaTest = enabled;
-    this.alphaTestThreshold = threshold;
     
-    // Update existing transparent materials
-    for (const material of this.materialCache.values()) {
-      if (material instanceof THREE.ShaderMaterial && material.transparent) {
-        (material as any).alphaTest = enabled ? threshold : undefined;
-        material.needsUpdate = true;
-      }
-    }
+    // Could update sun direction here based on day/night cycle
   }
   
-  setLightingSettings(maxLights: number, intensity: number): void {
-    this.maxLights = maxLights;
-    
-    for (const material of this.materialCache.values()) {
+  /**
+   * Updates the fog settings for all materials.
+   */
+  public setFog(color: THREE.Color, near: number, far: number): void {
+    this.settings.fogColor.copy(color);
+    this.settings.fogNear = near;
+    this.settings.fogFar = far;
+
+    for (const [, material] of this.materialCache) {
       if (material instanceof THREE.ShaderMaterial) {
-        if (material.uniforms.lightIntensity) {
-          material.uniforms.lightIntensity.value = intensity;
-        }
+        if(material.uniforms.uFogColor) material.uniforms.uFogColor.value = color;
+        if(material.uniforms.uFogNear) material.uniforms.uFogNear.value = near;
+        if(material.uniforms.uFogFar) material.uniforms.uFogFar.value = far;
       }
     }
   }
-  
-  // Memory management
-  clearCache(): void {
+
+  public clearCache(): void {
     for (const material of this.materialCache.values()) {
       material.dispose();
     }
     this.materialCache.clear();
-    this.shaderCache.clear();
-  }
-  
-  // Get cache statistics
-  getCacheStats(): {
-    materialCount: number;
-    shaderCount: number;
-    totalMemory: number;
-  } {
-    return {
-      materialCount: this.materialCache.size,
-      shaderCount: this.shaderCache.size,
-      totalMemory: this.estimateMemoryUsage()
-    };
-  }
-  
-  private estimateMemoryUsage(): number {
-    // Rough estimate of memory usage
-    return this.materialCache.size * 1024 + this.shaderCache.size * 512;
   }
 }
 
-// Optimized material factory
+// --- Advanced Factory (Cleaned Up) ---
+
 export class OptimizedMaterialFactory {
-  private static memoryManager = MemoryManager.getInstance();
   private static shaderSystem = OptimizedShaderSystem.getInstance();
-  
-  static createBlockMaterial(blockType: number, isTransparent: boolean = false): THREE.Material {
-    const type = isTransparent ? 'transparent' : 'block';
-    
-    // Try to get from memory pool first
-    const material = this.memoryManager.getMaterial(
-      type,
-      () => this.shaderSystem.getMaterial(type)
-    );
-    
-    return material;
+
+  static createBlockMaterial(texture: THREE.Texture): THREE.Material {
+    return this.shaderSystem.getMaterial('block', texture);
   }
-  
+
   static createWaterMaterial(): THREE.Material {
-    return this.memoryManager.getMaterial(
-      'water',
-      () => this.shaderSystem.getMaterial('water')
-    );
+    return this.shaderSystem.getMaterial('water');
+  }
+
+  static createFoliageMaterial(texture: THREE.Texture): THREE.Material {
+    return this.shaderSystem.getMaterial('foliage', texture);
   }
   
-  static createFoliageMaterial(): THREE.Material {
-    return this.memoryManager.getMaterial(
-      'foliage',
-      () => this.shaderSystem.getMaterial('foliage')
-    );
-  }
-  
-  static releaseMaterial(material: THREE.Material, type: string): void {
-    this.memoryManager.releaseMaterial(material, type);
+  static createTransparentMaterial(texture: THREE.Texture): THREE.Material {
+    return this.shaderSystem.getMaterial('transparent', texture);
   }
 }
 
-// Performance monitoring for shaders
-export class ShaderPerformanceMonitor {
-  private static instance: ShaderPerformanceMonitor;
-  
-  private frameTimes: Map<string, number[]> = new Map();
-  private renderCalls: Map<string, number> = new Map();
-  private maxHistory: number = 60;
-  
-  static getInstance(): ShaderPerformanceMonitor {
-    if (!ShaderPerformanceMonitor.instance) {
-      ShaderPerformanceMonitor.instance = new ShaderPerformanceMonitor();
-    }
-    return ShaderPerformanceMonitor.instance;
-  }
-  
-  recordRenderTime(shaderType: string, time: number): void {
-    if (!this.frameTimes.has(shaderType)) {
-      this.frameTimes.set(shaderType, []);
-    }
-    
-    const times = this.frameTimes.get(shaderType)!;
-    times.push(time);
-    
-    if (times.length > this.maxHistory) {
-      times.shift();
-    }
-    
-    if (!this.renderCalls.has(shaderType)) {
-      this.renderCalls.set(shaderType, 0);
-    }
-    this.renderCalls.set(shaderType, this.renderCalls.get(shaderType)! + 1);
-  }
-  
-  getAverageRenderTime(shaderType: string): number {
-    const times = this.frameTimes.get(shaderType);
-    if (!times || times.length === 0) return 0;
-    
-    return times.reduce((a: number, b: number) => a + b, 0) / times.length;
-  }
-  
-  getRenderStats(): Record<string, { averageTime: number; calls: number }> {
-    const stats: Record<string, any> = {};
-    
-    for (const [type, times] of this.frameTimes) {
-      stats[type] = {
-        averageTime: this.getAverageRenderTime(type),
-        calls: this.renderCalls.get(type) || 0
-      };
-    }
-    
-    return stats;
-  }
-  
-  reset(): void {
-    this.frameTimes.clear();
-    this.renderCalls.clear();
-  }
+// --- Interfaces ---
+
+interface IShaderConfig {
+  uniforms: { [key: string]: THREE.IUniform };
+  vertexShader: string;
+  fragmentShader: string;
+  transparent?: boolean;
+  side?: THREE.Side;
 }
 
 export default OptimizedShaderSystem.getInstance();

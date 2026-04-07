@@ -1,9 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useGameStore } from '@/stores/gameStore';
 import { worldManager } from '@/utils/WorldManager';
-import { worldDatabase } from '@/utils/WorldDatabase';
 
 interface WorldInfo {
   id: string;
@@ -22,6 +20,7 @@ export default function EnhancedWorldManager({ onWorldSelected, onBack }: {
   const [worldName, setWorldName] = useState('New World');
   const [seed, setSeed] = useState('');
   const [gameMode, setGameMode] = useState<'survival' | 'creative'>('creative');
+  const [generationMode, setGenerationMode] = useState<'classic' | 'new_generation'>('classic');
   const [errorMessage, setErrorMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -48,8 +47,7 @@ export default function EnhancedWorldManager({ onWorldSelected, onBack }: {
     setErrorMessage('');
 
     try {
-      const worldId = await worldManager.createNewWorld(worldName, seed ? parseInt(seed) : Date.now(), gameMode);
-      await worldManager.loadWorld(worldId);
+      const worldId = await worldManager.createNewWorld(worldName, seed ? parseInt(seed) : Date.now(), gameMode, generationMode);
       onWorldSelected(worldId);
     } catch (error) {
       setErrorMessage('Failed to create world: ' + (error as Error).message);
@@ -178,6 +176,34 @@ export default function EnhancedWorldManager({ onWorldSelected, onBack }: {
                 <option value="survival">Survival</option>
                 <option value="creative">Creative</option>
               </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">Generation</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setGenerationMode('classic')}
+                className={`p-3 rounded-lg border text-left transition-colors ${
+                  generationMode === 'classic'
+                    ? 'border-blue-500 bg-blue-500/15 text-blue-200'
+                    : 'border-gray-600 bg-gray-700 text-gray-300 hover:border-gray-500'
+                }`}
+              >
+                Classic
+              </button>
+              <button
+                type="button"
+                onClick={() => setGenerationMode('new_generation')}
+                className={`p-3 rounded-lg border text-left transition-colors ${
+                  generationMode === 'new_generation'
+                    ? 'border-blue-500 bg-blue-500/15 text-blue-200'
+                    : 'border-gray-600 bg-gray-700 text-gray-300 hover:border-gray-500'
+                }`}
+              >
+                New Generation
+              </button>
             </div>
           </div>
           <button
