@@ -20,11 +20,13 @@ export type {
 } from './ProgressionState';
 
 // Dimension Service
-export {
-  // Types
+export type {
   DimensionConfig,
   PortalLink,
   DimensionState,
+} from './DimensionService';
+
+export {
   // Constants
   OVERWORLD_CONFIG,
   NETHER_CONFIG,
@@ -45,7 +47,7 @@ export {
 } from './DimensionService';
 
 // Content Registry
-export {
+export type {
   // Interfaces
   LootTableEntry,
   LootCondition,
@@ -61,6 +63,9 @@ export {
   BiomeDecoration,
   BiomeFeature,
   StructureType as RegistryStructureType,
+} from './ContentRegistry';
+
+export {
   // Classes
   LootTableRegistry,
   PotionRecipeRegistry,
@@ -80,7 +85,7 @@ export {
 } from './ContentRegistry';
 
 // Tick Systems
-export {
+export type {
   // Interfaces
   TickSchedulerConfig,
   ScheduledTick,
@@ -95,6 +100,9 @@ export {
   // Types
   TickType,
   TickHandler,
+} from './TickSystems';
+
+export {
   // Constants
   DEFAULT_TICK_CONFIG,
   // Classes
