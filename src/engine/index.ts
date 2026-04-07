@@ -6,8 +6,7 @@
  */
 
 // Progression & Game Rules
-export {
-  // Types
+export type {
   BossKillRecord,
   BossType,
   DimensionId,
@@ -18,22 +17,6 @@ export {
   CraftingTier,
   GameRules,
   ProgressionStateData,
-  // Constants
-  DEFAULT_GAME_RULES,
-  CURRENT_SCHEMA_VERSION,
-  // Functions
-  createInitialProgressionState,
-  recordBossKill,
-  discoverStructure,
-  visitDimension,
-  completeAdvancement,
-  unlockCraftingTier,
-  setGameRule,
-  linkPortals,
-  activateEndPortal,
-  serializeProgressionState,
-  deserializeProgressionState,
-  migrateProgressionState,
 } from './ProgressionState';
 
 // Dimension Service
