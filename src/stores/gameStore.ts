@@ -2,10 +2,25 @@ import { create } from 'zustand';
 import { DAY_LENGTH } from '@/utils/constants';
 import { worldStorage, SavedWorld } from '@/engine/WorldStorage';
 import { useWorldStore } from '@/stores/worldStore';
-import { PerformanceProfile, DEFAULT_PERFORMANCE_PROFILE, PerformancePreset } from '@/utils/PerformanceProfile';
+import {
+  PerformanceProfile,
+  DEFAULT_PERFORMANCE_PROFILE,
+  PerformancePreset,
+  getPerformanceProfileFromPreset,
+} from '@/utils/PerformanceProfile';
 
 export type GameMode = 'survival' | 'creative' | 'spectator';
-export type GameState = 'menu' | 'playing' | 'paused' | 'inventory' | 'crafting' | 'chest' | 'furnace' | 'enchanting' | 'loading' | 'dead';
+export type GameState =
+  | 'menu'
+  | 'playing'
+  | 'paused'
+  | 'inventory'
+  | 'crafting'
+  | 'chest'
+  | 'furnace'
+  | 'enchanting'
+  | 'loading'
+  | 'dead';
 export type CameraMode = 'firstPerson' | 'thirdPerson';
 export type WorldInitMode = 'new' | 'loaded';
 export type WorldGenerationMode = 'classic' | 'new_generation';
@@ -26,16 +41,7 @@ export interface BreakingBlock {
   y: number;
   z: number;
   progress: number; // 0 to 1
-}
-
-
-
-export interface BreakingBlock {
-  x: number;
-  y: number;
-  z: number;
-  progress: number; // 0 → 1
-  // Face normal of the hit face — used by BlockBreakOverlay to orient the crack plane
+  // Face normal of the hit face, used by BlockBreakOverlay to orient the crack plane.
   nx?: number;
   ny?: number;
   nz?: number;
@@ -100,7 +106,10 @@ interface GameStore {
   setWorldId: (id: string | null) => void;
   openContainer: (container: { x: number; y: number; z: number; type: 'chest' | 'furnace' | 'enchanting' } | null) => void;
   loadSavedWorlds: () => Promise<void>;
-  saveCurrentWorld: (playerPos: { x: number; y: number; z: number }, playerRot: { yaw: number; pitch: number }) => Promise<void>;
+  saveCurrentWorld: (
+    playerPos: { x: number; y: number; z: number },
+    playerRot: { yaw: number; pitch: number }
+  ) => Promise<void>;
   loadWorld: (worldId: string) => Promise<SavedWorld | null>;
   deleteWorld: (worldId: string) => Promise<void>;
   setPerformanceProfile: (profile: PerformanceProfile | PerformancePreset) => void;
@@ -293,7 +302,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   setPerformanceProfile: (profile) => {
-    const newProfile = typeof profile === 'string' 
+    const newProfile = typeof profile === 'string'
       ? getPerformanceProfileFromPreset(profile)
       : profile;
     set({ performanceProfile: newProfile });

@@ -112,3 +112,7 @@ export const PERFORMANCE_PROFILES: Record<PerformancePreset, PerformanceProfile>
 };
 
 export const DEFAULT_PERFORMANCE_PROFILE: PerformanceProfile = PERFORMANCE_PROFILES.balanced;
+
+export function getPerformanceProfileFromPreset(preset: PerformancePreset): PerformanceProfile {
+  return PERFORMANCE_PROFILES[preset];
+}

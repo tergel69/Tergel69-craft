@@ -6,8 +6,7 @@
  */
 
 // Progression & Game Rules
-export {
-  // Types
+export type {
   BossKillRecord,
   BossType,
   DimensionId,
@@ -18,10 +17,11 @@ export {
   CraftingTier,
   GameRules,
   ProgressionStateData,
-  // Constants
+} from './ProgressionState';
+
+export {
   DEFAULT_GAME_RULES,
   CURRENT_SCHEMA_VERSION,
-  // Functions
   createInitialProgressionState,
   recordBossKill,
   discoverStructure,
@@ -37,18 +37,18 @@ export {
 } from './ProgressionState';
 
 // Dimension Service
-export {
-  // Types
+export type {
   DimensionConfig,
   PortalLink,
   DimensionState,
-  // Constants
+} from './DimensionService';
+
+export {
   OVERWORLD_CONFIG,
   NETHER_CONFIG,
   END_CONFIG,
   DIMENSION_CONFIGS,
   DIMENSION_SCALE,
-  // Functions
   calculatePortalLink,
   findOrCreatePortalLink,
   createInitialDimensionState,
@@ -62,8 +62,7 @@ export {
 } from './DimensionService';
 
 // Content Registry
-export {
-  // Interfaces
+export type {
   LootTableEntry,
   LootCondition,
   LootFunction,
@@ -78,27 +77,26 @@ export {
   BiomeDecoration,
   BiomeFeature,
   StructureType as RegistryStructureType,
-  // Classes
+} from './ContentRegistry';
+
+export {
   LootTableRegistry,
   PotionRecipeRegistry,
   VillagerProfessionRegistry,
   StructureRegistry,
   AdvancementRegistry,
   BiomeDecorationRegistry,
-  // Instances
   lootTableRegistry,
   potionRecipeRegistry,
   villagerProfessionRegistry,
   structureRegistry,
   advancementRegistry,
   biomeDecorationRegistry,
-  // Functions
   registerDefaultContent,
 } from './ContentRegistry';
 
 // Tick Systems
-export {
-  // Interfaces
+export type {
   TickSchedulerConfig,
   ScheduledTick,
   TickResult,
@@ -109,15 +107,13 @@ export {
   VillagerTickData,
   MobEventTickData,
   TickContext,
-  // Types
   TickType,
   TickHandler,
-  // Constants
+} from './TickSystems';
+
+export {
   DEFAULT_TICK_CONFIG,
-  // Classes
   TickScheduler,
-  // Functions
   createDefaultHandlers,
-  // Instance
   globalTickScheduler,
 } from './TickSystems';

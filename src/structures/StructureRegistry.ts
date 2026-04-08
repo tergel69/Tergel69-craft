@@ -136,6 +136,7 @@ const BIOME_TO_TAGS: Record<BiomeType, BiomeTag[]> = {
   [BiomeType.DARK_FOREST]: [BiomeTag.FOREST, BiomeTag.SWAMP],
   [BiomeType.FLOWER_FOREST]: [BiomeTag.FOREST, BiomeTag.PLAINS],
   [BiomeType.CHERRY_GROVE]: [BiomeTag.FOREST, BiomeTag.PLAINS],
+  [BiomeType.ORANGE_GROVE]: [BiomeTag.FOREST, BiomeTag.PLAINS],
   [BiomeType.MEADOW]: [BiomeTag.PLAINS],
   [BiomeType.DEEP_OCEAN]: [BiomeTag.OCEAN],
   [BiomeType.FROZEN_OCEAN]: [BiomeTag.OCEAN, BiomeTag.SNOW],

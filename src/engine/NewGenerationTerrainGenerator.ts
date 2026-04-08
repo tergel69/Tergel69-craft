@@ -20,6 +20,7 @@ const SURFACE_BIOMES: Record<BiomeType, SurfaceBiomeConfig> = {
   [BiomeType.BADLANDS]: { surface: BlockType.RED_SAND, subsurface: BlockType.TERRACOTTA, filler: BlockType.STONE },
   [BiomeType.MEADOW]: { surface: BlockType.GRASS, subsurface: BlockType.DIRT, filler: BlockType.STONE },
   [BiomeType.CHERRY_GROVE]: { surface: BlockType.GRASS, subsurface: BlockType.DIRT, filler: BlockType.STONE },
+  [BiomeType.ORANGE_GROVE]: { surface: BlockType.GRASS, subsurface: BlockType.DIRT, filler: BlockType.STONE },
   [BiomeType.MUSHROOM_ISLAND]: { surface: BlockType.GRASS, subsurface: BlockType.DIRT, filler: BlockType.STONE },
   [BiomeType.SNOW]: { surface: BlockType.SNOW, subsurface: BlockType.DIRT, filler: BlockType.STONE },
   [BiomeType.ICE_SPIKES]: { surface: BlockType.SNOW, subsurface: BlockType.SNOW, filler: BlockType.STONE },
@@ -372,6 +373,7 @@ export class NewGenerationTerrainGenerator {
       [BiomeType.MUSHROOM]: { tempRange: [0.30, 0.60], humRange: [0.90, 1.0] },
       [BiomeType.MEADOW]: { tempRange: [0.25, 0.70], humRange: [0.45, 0.85] },
       [BiomeType.CHERRY_GROVE]: { tempRange: [0.28, 0.58], humRange: [0.45, 0.78] },
+      [BiomeType.ORANGE_GROVE]: { tempRange: [0.55, 0.80], humRange: [0.35, 0.60] },
       [BiomeType.MUSHROOM_ISLAND]: { tempRange: [0.30, 0.60], humRange: [0.88, 1.0] },
       [BiomeType.VOLCANIC]: { tempRange: [0.85, 1.0], humRange: [0.60, 1.0] },
     } as Record<BiomeType, { tempRange: [number, number]; humRange: [number, number] }>)) {
