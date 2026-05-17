@@ -306,11 +306,6 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
     return 1.0; // Normal jump/swim speed
   },
 
-  applyPhysics: (x: number, y: number, z: number, vx: number, vy: number, vz: number, delta: number, isFlying: boolean) => {
-    // This will be implemented by importing and using the physics function
-    return { x, y, z, vx, vy, vz, onGround: false, inWater: false, inLava: false, hitHead: false };
-  },
-
   reset: () => set(initialState),
 }));
 

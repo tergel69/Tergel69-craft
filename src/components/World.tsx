@@ -17,14 +17,6 @@ import { getDeterministicSpawnAnchor, resolveSpawnLocation } from '@/utils/spawn
 const MemoizedChunk = memo(Chunk);
 const MIN_EFFECTIVE_RENDER_DISTANCE = 6;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Spawn position finder — reads directly from worldStore (bypasses React state)
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ─────────────────────────────────────────────────────────────────────────────
-// World component
-// ─────────────────────────────────────────────────────────────────────────────
-
 export default function World() {
   const { camera } = useThree();
   const [initialized, setInitialized] = useState(false);
@@ -34,15 +26,11 @@ export default function World() {
     Math.max(MIN_EFFECTIVE_RENDER_DISTANCE, useGameStore.getState().renderDistance)
   );
 
-  const setPosition    = usePlayerStore((state) => state.setPosition);
   const worldSeed      = useGameStore((state) => state.worldSeed);
   const worldGenerationMode = useGameStore((state) => state.worldGenerationMode);
   const worldInitMode  = useGameStore((state) => state.worldInitMode);
   const renderDistance = useGameStore((state) => state.renderDistance);
   const gameState      = useGameStore((state) => state.gameState);
-  const setLoading     = useGameStore((state) => state.setLoading);
-  const setGameState   = useGameStore((state) => state.setGameState);
-
   const loadedChunks   = useWorldStore((state) => state.loadedChunks);
   const loadedChunkVersion = useWorldStore((state) => state.loadedChunkVersion);
   const dirtyChunkVersion = useWorldStore((state) => state.dirtyChunkVersion);
@@ -77,8 +65,7 @@ export default function World() {
       if (cancelled) return;
       useGameStore.getState().setLoading(true, 20, 'Generating terrain…');
 
-      // Generate chunks synchronously - larger radius to ensure good spawn
-      // Use larger radius to guarantee proper terrain generation
+      // Generate enough chunks around spawn to guarantee terrain exists before placement.
       const initialRadius = Math.max(8, Math.min(12, Math.floor(renderDistance / 2)));
       manager.generateInitialChunks(spawnAnchor.x, spawnAnchor.z, initialRadius);
 
@@ -92,7 +79,7 @@ export default function World() {
         let resolvedSpawn = resolveSpawnLocation({
           originX: spawnAnchor.x,
           originZ: spawnAnchor.z,
-          searchRadius: 128, // Larger search to find proper terrain
+          searchRadius: 128,
           requireLoadedChunks: true,
           allowFallback: true,
           fallbackY: 64,
@@ -103,10 +90,10 @@ export default function World() {
           const retrySpawn = resolveSpawnLocation({
             originX: spawnAnchor.x,
             originZ: spawnAnchor.z,
-            searchRadius: 256, // Even larger search
-            requireLoadedChunks: false, // Don't require loaded chunks
+            searchRadius: 256,
+            requireLoadedChunks: false,
             allowFallback: true,
-            fallbackY: 70, // Try to find above water
+            fallbackY: 70,
           });
           if (retrySpawn) {
             resolvedSpawn = retrySpawn;
@@ -115,7 +102,7 @@ export default function World() {
 
         finalPosition = resolvedSpawn?.position ?? {
           x: spawnAnchor.x + 0.5,
-          y: 64, // Use sea level as fallback
+          y: 64,
           z: spawnAnchor.z + 0.5,
         };
 
@@ -223,17 +210,16 @@ export default function World() {
     // Conservative throttling to keep game smooth
     let intervalMs: number;
     if (queueNotEmpty) {
-      // Queue exist - throttle more to process queue
       const queueSize = manager.getQueueSize();
       if (queueSize > 20) {
-        intervalMs = 80; // Reduced from 300 - faster loading when behind
+        intervalMs = 80;
       } else if (queueSize > 10) {
-        intervalMs = 50; // Reduced from 200 - faster loading
+        intervalMs = 50;
       } else {
-        intervalMs = 30; // Reduced from 150 - responsive loading
+        intervalMs = 30;
       }
     } else {
-      intervalMs = chunkChanged ? 50 : 100; // Much faster updates
+      intervalMs = chunkChanged ? 50 : 100;
     }
     
     if (now - lastUpdateRef.current < intervalMs) return;
