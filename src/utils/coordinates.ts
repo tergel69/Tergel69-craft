@@ -1,4 +1,4 @@
-import { CHUNK_SIZE, CHUNK_HEIGHT } from './constants';
+import { CHUNK_SIZE, CHUNK_HEIGHT, MAX_WORLD_Y, MIN_WORLD_Y } from './constants';
 
 export interface Vector3 {
   x: number;
@@ -23,7 +23,7 @@ export function worldToChunk(x: number, z: number): ChunkCoord {
 export function worldToLocal(x: number, y: number, z: number): Vector3 {
   return {
     x: ((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE,
-    y: Math.max(0, Math.min(CHUNK_HEIGHT - 1, Math.floor(y))),
+    y: worldYToLocalY(y),
     z: ((z % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE,
   };
 }
@@ -38,7 +38,7 @@ export function localToWorld(
 ): Vector3 {
   return {
     x: chunkX * CHUNK_SIZE + localX,
-    y: localY,
+    y: localYToWorldY(localY),
     z: chunkZ * CHUNK_SIZE + localZ,
   };
 }
@@ -55,6 +55,26 @@ export function getBlockCoords(index: number): Vector3 {
   const z = Math.floor(remainder / CHUNK_SIZE);
   const x = remainder % CHUNK_SIZE;
   return { x, y, z };
+}
+
+export function isWorldYInBounds(y: number): boolean {
+  return y >= MIN_WORLD_Y && y < MAX_WORLD_Y;
+}
+
+export function clampWorldY(y: number): number {
+  return Math.max(MIN_WORLD_Y, Math.min(MAX_WORLD_Y - 1, Math.floor(y)));
+}
+
+export function worldYToLocalY(y: number): number {
+  return Math.max(0, Math.min(CHUNK_HEIGHT - 1, Math.floor(y) - MIN_WORLD_Y));
+}
+
+export function localYToWorldY(localY: number): number {
+  return MIN_WORLD_Y + Math.max(0, Math.min(CHUNK_HEIGHT - 1, Math.floor(localY)));
+}
+
+export function heightMapWorldYToLocalY(worldY: number): number {
+  return worldYToLocalY(Math.max(MIN_WORLD_Y, Math.min(MAX_WORLD_Y - 1, worldY)));
 }
 
 // Create a unique key for chunk coordinates

@@ -8,6 +8,7 @@ import {
   PLAYER_SNEAK_MULTIPLIER,
   PLAYER_SWIM_SPEED,
   PLAYER_SWIM_VERTICAL_SPEED,
+  SEA_LEVEL,
 } from '@/utils/constants';
 
 import { useWorldStore } from '@/stores/worldStore';
@@ -95,7 +96,7 @@ interface PlayerStore {
   setOxygen: (oxygen: number) => void;
 }
 
-const initialPosition = { x: 0, y: 100, z: 0 };
+const initialPosition = { x: 0, y: SEA_LEVEL + 8, z: 0 };
 const initialRotation = { yaw: 0, pitch: 0 };
 const initialVelocity = { x: 0, y: 0, z: 0 };
 
@@ -304,11 +305,6 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
       return PLAYER_SWIM_VERTICAL_SPEED;
     }
     return 1.0; // Normal jump/swim speed
-  },
-
-  applyPhysics: (x: number, y: number, z: number, vx: number, vy: number, vz: number, delta: number, isFlying: boolean) => {
-    // This will be implemented by importing and using the physics function
-    return { x, y, z, vx, vy, vz, onGround: false, inWater: false, inLava: false, hitHead: false };
   },
 
   reset: () => set(initialState),

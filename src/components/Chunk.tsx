@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useEffect } from 'react';
+import { useMemo, useRef, useEffect, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { useWorldStore } from '@/stores/worldStore';
 import { buildWaterMesh, createBlockMaterial, createWaterMaterial } from '@/engine/MeshBuilder';
@@ -52,6 +52,9 @@ let texturesPreloaded = false;
 export default function Chunk({ chunkX, chunkZ, version }: ChunkProps) {
   const geometriesRef = useRef<THREE.BufferGeometry[]>([]);
   const waterGeometryRef = useRef<THREE.BufferGeometry | null>(null);
+  const meshWorkerRef = useRef<Worker | null>(null);
+  const [workerMeshes, setWorkerMeshes] = useState<{ geometry: THREE.BufferGeometry; texture: THREE.Texture; renderMode: 'opaque' | 'cutout' | 'translucent' }[] | null>(null);
+  const [isBuildingMesh, setIsBuildingMesh] = useState(false);
 
   const chunk = useWorldStore((state) => state.getChunk(chunkX, chunkZ));
   const getChunk = useWorldStore((state) => state.getChunk);
@@ -64,6 +67,50 @@ export default function Chunk({ chunkX, chunkZ, version }: ChunkProps) {
     }
   }, []);
 
+  // Initialize mesh worker
+  useEffect(() => {
+    try {
+      meshWorkerRef.current = new Worker(new URL('../workers/meshWorker.ts', import.meta.url), { type: 'module' });
+
+      meshWorkerRef.current.onmessage = (e) => {
+        const { type, chunkX: responseChunkX, chunkZ: responseChunkZ, meshes, waterMesh } = e.data;
+        if (type === 'mesh_built' && responseChunkX === chunkX && responseChunkZ === chunkZ) {
+          // Convert worker data to THREE geometries
+          const threeMeshes = meshes.map((meshData: any) => {
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(meshData.positions, 3));
+            geometry.setAttribute('normal', new THREE.Float32BufferAttribute(meshData.normals, 3));
+            geometry.setAttribute('uv', new THREE.Float32BufferAttribute(meshData.uvs, 2));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(meshData.colors, 3));
+            geometry.setIndex(meshData.indices);
+            geometry.computeBoundingSphere();
+
+            // Get texture from textureManager (simplified)
+            const texture = textureManager.getBlockTexture(1, 'side'); // Default texture
+
+            return {
+              geometry,
+              texture,
+              renderMode: meshData.renderMode,
+            };
+          });
+
+          setWorkerMeshes(threeMeshes);
+          setIsBuildingMesh(false);
+        }
+      };
+
+      return () => {
+        if (meshWorkerRef.current) {
+          meshWorkerRef.current.terminate();
+        }
+      };
+    } catch (error) {
+      console.warn('Mesh worker not supported, falling back to main thread');
+      meshWorkerRef.current = null;
+    }
+  }, [chunkX, chunkZ]);
+
   // Get neighboring chunks for mesh building
   const neighbors = useMemo(() => ({
     north: getChunk(chunkX, chunkZ - 1),
@@ -73,22 +120,39 @@ export default function Chunk({ chunkX, chunkZ, version }: ChunkProps) {
   }), [chunkX, chunkZ, getChunk]);
 
   // Build multi-texture mesh when chunk data changes
-  const multiTextureMeshes = useMemo(() => {
-    // Dispose old geometries
-    geometriesRef.current.forEach((geo) => geo.dispose());
-    geometriesRef.current = [];
-
-    if (!chunk || !chunk.isGenerated) return null;
-
-    const meshes = buildMultiTextureChunkMesh(chunk, neighbors);
-
-    // Store new geometries for later disposal
-    if (meshes) {
-      geometriesRef.current = meshes.map((m) => m.geometry);
+  const buildMesh = useCallback(() => {
+    if (!chunk || !chunk.isGenerated) {
+      setWorkerMeshes(null);
+      return;
     }
 
-    return meshes;
-  }, [chunk, neighbors, version]);
+    if (meshWorkerRef.current && !isBuildingMesh) {
+      setIsBuildingMesh(true);
+      meshWorkerRef.current.postMessage({
+        type: 'build_mesh',
+        chunk,
+        neighbors,
+      });
+    } else if (!meshWorkerRef.current) {
+      // Fallback to main thread
+      // Dispose old geometries
+      geometriesRef.current.forEach((geo) => geo.dispose());
+      geometriesRef.current = [];
+
+      const meshes = buildMultiTextureChunkMesh(chunk, neighbors);
+
+      // Store new geometries for later disposal
+      if (meshes) {
+        geometriesRef.current = meshes.map((m) => m.geometry);
+      }
+
+      setWorkerMeshes(meshes);
+    }
+  }, [chunk, neighbors, version, isBuildingMesh]);
+
+  useEffect(() => {
+    buildMesh();
+  }, [buildMesh]);
 
   // Build water mesh
   const waterGeometry = useMemo(() => {
@@ -112,25 +176,31 @@ export default function Chunk({ chunkX, chunkZ, version }: ChunkProps) {
       geometriesRef.current.forEach((geo) => geo.dispose());
       geometriesRef.current = [];
 
+      if (workerMeshes) {
+        workerMeshes.forEach((mesh) => mesh.geometry.dispose());
+      }
+
       if (waterGeometryRef.current) {
         waterGeometryRef.current.dispose();
         waterGeometryRef.current = null;
       }
     };
-  }, []);
+  }, [workerMeshes]);
 
   // World position
   const worldX = chunkX * CHUNK_SIZE;
   const worldZ = chunkZ * CHUNK_SIZE;
 
-  if (!chunk || !chunk.isGenerated || !multiTextureMeshes) {
+  const meshesToRender = workerMeshes;
+
+  if (!chunk || !chunk.isGenerated || !meshesToRender) {
     return null;
   }
 
   return (
     <group position={[worldX, 0, worldZ]}>
       {/* Multi-texture solid blocks - using cached materials */}
-      {multiTextureMeshes.map((meshData, index) => (
+      {meshesToRender.map((meshData, index) => (
         <mesh
           key={index}
           geometry={meshData.geometry}

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { BlockType, BLOCKS, isTransparent } from '@/data/blocks';
 import { CHUNK_SIZE, CHUNK_HEIGHT } from '@/utils/constants';
 import { ChunkData, getBlockFromChunk } from '@/stores/worldStore';
+import { heightMapWorldYToLocalY } from '@/utils/coordinates';
 import { decodeTerrainBiome } from '@/utils/biomeEncoding';
 import { BiomeType as VisualBiomeType, getBiomeData } from '@/data/biomes';
 import { simpleBlockColorSystem } from '@/data/simpleBlockColors';
@@ -158,7 +159,7 @@ export function buildChunkMesh(
       // Add a small buffer above the height map to account for plants/structures
       const columnHeight = Math.min(
         CHUNK_HEIGHT,
-        (chunk.heightMap[columnIndex] || 0) + 2
+        heightMapWorldYToLocalY(chunk.heightMap[columnIndex] || 0) + 2
       );
 
       for (let y = 0; y < columnHeight; y++) {

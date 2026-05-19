@@ -8,6 +8,7 @@ import {
   PLAYER_HEIGHT,
   PLAYER_WIDTH,
   JUMP_VELOCITY,
+  SEA_LEVEL,
 } from '@/utils/constants';
 
 export interface AABB {
@@ -56,6 +57,13 @@ export function intersectsSolid(aabb: AABB): boolean {
   for (let x = minX; x <= maxX; x++) {
     for (let y = minY; y <= maxY; y++) {
       for (let z = minZ; z <= maxZ; z++) {
+        const chunkCoord = worldToChunk(x, z);
+        const chunk = worldStore.getChunk(chunkCoord.x, chunkCoord.z);
+        // Treat not-yet-generated terrain as solid so player cannot phase through while chunks stream in.
+        if (!chunk || !chunk.isGenerated) {
+          return true;
+        }
+
         const block = worldStore.getBlock(x, y, z);
         if (isSolid(block)) {
           const boxes = getBlockCollisionBoxes(x, y, z, block);
@@ -233,7 +241,38 @@ export function applyPhysics(
   if (intersectsSolid(getPlayerAABB(x, newY, z))) {
     if (vy < 0) { y = Math.floor(y) + 0.001; onGround = true; vy = 0; }
     else { y = Math.ceil(y + PLAYER_HEIGHT) - PLAYER_HEIGHT - 0.001; hitHead = true; vy = 0; }
-  } else { y = newY; }
+  } else {
+    // Void protection: prevent falling below y=0
+    if (newY < 0 && !isFlying) {
+      // Find safe spawn position near current location
+      const safePos = findSafeSpawnPosition(x, z, 32, false);
+      if (safePos) {
+        return {
+          x: safePos.x,
+          y: safePos.y,
+          z: safePos.z,
+          vx: 0, vy: 0, vz: 0,
+          onGround: true,
+          inWater: false,
+          inLava: false,
+          hitHead: false
+        };
+      } else {
+        // Emergency fallback - teleport to sea level
+        return {
+          x: Math.floor(x) + 0.5,
+          y: SEA_LEVEL + 2,
+          z: Math.floor(z) + 0.5,
+          vx: 0, vy: 0, vz: 0,
+          onGround: false,
+          inWater: false,
+          inLava: false,
+          hitHead: false
+        };
+      }
+    }
+    y = newY;
+  }
 
   // X axis
   const newX = x + vx * delta;
@@ -300,8 +339,8 @@ export function findSafeSpawnPosition(
     searchRadius,
     requireLoadedChunks,
     allowFallback: true,
-    fallbackY: 180,
+    fallbackY: SEA_LEVEL + 8,
   });
 
-  return resolved?.position ?? { x: Math.floor(x) + 0.5, y: 180, z: Math.floor(z) + 0.5 };
+  return resolved?.position ?? { x: Math.floor(x) + 0.5, y: SEA_LEVEL + 8, z: Math.floor(z) + 0.5 };
 }

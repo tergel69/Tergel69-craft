@@ -1,8 +1,19 @@
 import { Chunk } from './Chunk';
 import { BlockType } from '@/data/blocks';
-import { CHUNK_SIZE, CHUNK_HEIGHT, SEA_LEVEL } from '@/utils/constants';
+import {
+  ABYSS_BAND_Y,
+  CHUNK_HEIGHT,
+  CHUNK_SIZE,
+  DEEP_CAVE_BAND_Y,
+  MAX_WORLD_Y,
+  MIN_WORLD_Y,
+  SEA_LEVEL,
+  SURFACE_BAND_MAX_Y,
+} from '@/utils/constants';
+import { localYToWorldY, worldYToLocalY } from '@/utils/coordinates';
 import { NoiseGenerator, getWorldNoise, resetWorldNoise } from '@/utils/noise';
 import { BiomeType } from './TerrainGenerator';
+import { DEFAULT_BIOME_CONFIGS_V2 } from '@/worldgen/preset';
 
 type SurfaceBiomeConfig = {
   surface: BlockType;
@@ -15,25 +26,40 @@ const SURFACE_BIOMES: Record<BiomeType, SurfaceBiomeConfig> = {
   [BiomeType.SUNFLOWER_PLAINS]: { surface: BlockType.GRASS, subsurface: BlockType.DIRT, filler: BlockType.STONE },
   [BiomeType.FOREST]: { surface: BlockType.GRASS, subsurface: BlockType.DIRT, filler: BlockType.STONE },
   [BiomeType.DARK_FOREST]: { surface: BlockType.GRASS, subsurface: BlockType.DIRT, filler: BlockType.STONE },
-  [BiomeType.DESERT]: { surface: BlockType.SAND, subsurface: BlockType.SAND, filler: BlockType.SANDSTONE },
+  [BiomeType.DESERT]: { surface: BlockType.SAND, subsurface: BlockType.SANDSTONE, filler: BlockType.SANDSTONE },
   [BiomeType.BEACH]: { surface: BlockType.SAND, subsurface: BlockType.SAND, filler: BlockType.SANDSTONE },
-  [BiomeType.BADLANDS]: { surface: BlockType.RED_SAND, subsurface: BlockType.TERRACOTTA, filler: BlockType.STONE },
+  [BiomeType.BADLANDS]: { surface: BlockType.RED_SAND, subsurface: BlockType.TERRACOTTA, filler: BlockType.TERRACOTTA },
   [BiomeType.MEADOW]: { surface: BlockType.GRASS, subsurface: BlockType.DIRT, filler: BlockType.STONE },
   [BiomeType.CHERRY_GROVE]: { surface: BlockType.GRASS, subsurface: BlockType.DIRT, filler: BlockType.STONE },
-  [BiomeType.ORANGE_GROVE]: { surface: BlockType.GRASS, subsurface: BlockType.DIRT, filler: BlockType.STONE },
   [BiomeType.MUSHROOM_ISLAND]: { surface: BlockType.GRASS, subsurface: BlockType.DIRT, filler: BlockType.STONE },
   [BiomeType.SNOW]: { surface: BlockType.SNOW, subsurface: BlockType.DIRT, filler: BlockType.STONE },
-  [BiomeType.ICE_SPIKES]: { surface: BlockType.SNOW, subsurface: BlockType.SNOW, filler: BlockType.STONE },
+  [BiomeType.ICE_SPIKES]: { surface: BlockType.SNOW, subsurface: BlockType.ICE, filler: BlockType.STONE },
   [BiomeType.JUNGLE]: { surface: BlockType.GRASS, subsurface: BlockType.DIRT, filler: BlockType.STONE },
-  [BiomeType.MOUNTAINS]: { surface: BlockType.GRASS, subsurface: BlockType.STONE, filler: BlockType.STONE },
+  [BiomeType.MOUNTAINS]: { surface: BlockType.STONE, subsurface: BlockType.STONE, filler: BlockType.STONE },
   [BiomeType.MEGA_MOUNTAINS]: { surface: BlockType.STONE, subsurface: BlockType.STONE, filler: BlockType.STONE },
-  [BiomeType.SWAMP]: { surface: BlockType.GRASS, subsurface: BlockType.DIRT, filler: BlockType.CLAY },
+  [BiomeType.SWAMP]: { surface: BlockType.GRASS, subsurface: BlockType.DIRT, filler: BlockType.CLAY ?? BlockType.DIRT },
   [BiomeType.TAIGA]: { surface: BlockType.GRASS, subsurface: BlockType.DIRT, filler: BlockType.STONE },
   [BiomeType.SAVANNA]: { surface: BlockType.GRASS, subsurface: BlockType.DIRT, filler: BlockType.STONE },
   [BiomeType.MUSHROOM]: { surface: BlockType.GRASS, subsurface: BlockType.DIRT, filler: BlockType.STONE },
-  [BiomeType.OCEAN]: { surface: BlockType.SAND, subsurface: BlockType.SAND, filler: BlockType.SANDSTONE },
-  [BiomeType.DEEP_OCEAN]: { surface: BlockType.GRAVEL, subsurface: BlockType.STONE, filler: BlockType.STONE },
-  [BiomeType.VOLCANIC]: { surface: BlockType.BASALT, subsurface: BlockType.NETHERRACK, filler: BlockType.STONE },
+  [BiomeType.OCEAN]: { surface: BlockType.SAND, subsurface: BlockType.SAND, filler: BlockType.STONE },
+  [BiomeType.DEEP_OCEAN]: { surface: BlockType.GRAVEL ?? BlockType.STONE, subsurface: BlockType.STONE, filler: BlockType.STONE },
+  [BiomeType.VOLCANIC]: { surface: BlockType.BASALT, subsurface: BlockType.NETHERRACK, filler: BlockType.OBSIDIAN },
+  [BiomeType.ORANGE_GROVE]: { surface: BlockType.GRASS, subsurface: BlockType.DIRT, filler: BlockType.STONE },
+};
+
+const MYTHIC_BIOME_BY_TERRAIN: Partial<Record<BiomeType, keyof typeof DEFAULT_BIOME_CONFIGS_V2>> = {
+  [BiomeType.MEGA_MOUNTAINS]: 'stormpeak_highlands',
+  [BiomeType.VOLCANIC]: 'ember_caldera',
+  [BiomeType.FOREST]: 'skyroot_forest',
+  [BiomeType.DARK_FOREST]: 'skyroot_forest',
+  [BiomeType.BADLANDS]: 'shattered_badlands',
+  [BiomeType.SAVANNA]: 'blooming_giantsteppe',
+  [BiomeType.MEADOW]: 'blooming_giantsteppe',
+  [BiomeType.ICE_SPIKES]: 'crystal_barrens',
+  [BiomeType.SNOW]: 'moonfrost_tundra',
+  [BiomeType.SWAMP]: 'sunken_hollow_basin',
+  [BiomeType.OCEAN]: 'sunken_hollow_basin',
+  [BiomeType.DEEP_OCEAN]: 'sunken_hollow_basin',
 };
 
 export class NewGenerationTerrainGenerator {
@@ -41,7 +67,7 @@ export class NewGenerationTerrainGenerator {
 
   constructor(seed: number = Date.now()) {
     resetWorldNoise();
-    this.noise = getWorldNoise(seed ^ 0x5f3759df);
+    this.noise = getWorldNoise(seed ^ 0x7f4a7c15);
   }
 
   generateChunk(cx: number, cz: number): Chunk {
@@ -49,105 +75,70 @@ export class NewGenerationTerrainGenerator {
     const worldX = cx * CHUNK_SIZE;
     const worldZ = cz * CHUNK_SIZE;
 
+    const surfaceHeights: number[][] = Array.from({ length: CHUNK_SIZE }, () => Array(CHUNK_SIZE).fill(SEA_LEVEL));
+    const biomes: BiomeType[][] = Array.from({ length: CHUNK_SIZE }, () => Array(CHUNK_SIZE).fill(BiomeType.PLAINS));
+
     for (let x = 0; x < CHUNK_SIZE; x++) {
       for (let z = 0; z < CHUNK_SIZE; z++) {
         const wx = worldX + x;
         const wz = worldZ + z;
-        const featureMask = this.hash3(wx * 0.018, 0, wz * 0.018);
-        const skyBridgeMask = this.hash3(wx * 0.006, 0, wz * 0.006);
-        const height = this.getBlendedSurfaceHeight(wx, wz);
         const biome = this.getBiome(wx, wz);
-        const caveBias = this.noise.fbm3D(wx, 48, wz, 3, 0.55, 2.0, 0.0045);
-        const config = SURFACE_BIOMES[biome];
-        const frozen = biome === BiomeType.SNOW || biome === BiomeType.ICE_SPIKES;
+        const surfaceY = this.getSurfaceHeight(wx, wz, biome);
+        biomes[x][z] = biome;
+        surfaceHeights[x][z] = surfaceY;
 
-        for (let y = 0; y < CHUNK_HEIGHT; y++) {
-          let block = BlockType.AIR;
-
-          if (y === 0) {
-            block = BlockType.BEDROCK;
-          } else if (y > height) {
-            const skyIslandBase = 104 + Math.floor(skyBridgeMask * 10);
-            const isRareSkyIsland =
-              featureMask > 0.985 &&
-              biome !== BiomeType.OCEAN &&
-              biome !== BiomeType.DEEP_OCEAN &&
-              biome !== BiomeType.SWAMP;
-
-            if (isRareSkyIsland && y > skyIslandBase && y < skyIslandBase + 10) {
-              const islandHeight = skyIslandBase + 10 - y;
-              block = islandHeight <= 2 ? config.surface : BlockType.STONE;
-            } else if (y <= SEA_LEVEL && height < SEA_LEVEL) {
-              block = frozen ? BlockType.ICE : BlockType.WATER;
-            }
-          } else {
-            const depth = height - y;
-            const density = this.noise.fbm3D(wx, y, wz, 4, 0.5, 2.0, 0.018) - (y / CHUNK_HEIGHT) * 0.5 + caveBias * 0.22;
-            const cave = this.noise.getCaveNoise(wx, y, wz);
-
-            if (depth === 0) {
-              block = config.surface;
-            } else if (depth < 4) {
-              block = config.subsurface;
-            } else {
-              block = config.filler;
-            }
-
-            if (cave > 0.58 && y < height - 5 && y > 5) {
-              block = BlockType.AIR;
-            } else if (density < -0.02 && y < height - 4 && y > 6) {
-              block = BlockType.AIR;
-            }
-
-            if (biome === BiomeType.VOLCANIC && y < height - 1 && y > SEA_LEVEL - 6) {
-              if (density > 0.2) block = BlockType.OBSIDIAN;
-            }
-            if (frozen && depth === 0 && height >= SEA_LEVEL - 1) {
-              block = BlockType.SNOW;
-            }
-          }
-
-          chunk.setBlock(x, y, z, block);
+        for (let localY = 0; localY < CHUNK_HEIGHT; localY++) {
+          const worldY = localYToWorldY(localY);
+          const block = this.getBlockForPoint(wx, worldY, wz, surfaceY, biome);
+          chunk.setBlock(x, localY, z, block);
         }
       }
     }
 
-    this.carveExtremeFeatures(chunk, worldX, worldZ);
-    this.decorateSurface(chunk, worldX, worldZ);
+    this.decorateSurface(chunk, worldX, worldZ, surfaceHeights, biomes);
+    this.generateOres(chunk, worldX, worldZ);
     return chunk;
   }
 
-  private carveExtremeFeatures(chunk: Chunk, worldX: number, worldZ: number): void {
-    for (let x = 0; x < CHUNK_SIZE; x++) {
-      for (let z = 0; z < CHUNK_SIZE; z++) {
-        const wx = worldX + x;
-        const wz = worldZ + z;
-        const shaftMask = this.hash3(wx * 0.02, 0, wz * 0.02);
-        const cavernMask = this.noise.fbm2D(wx * 0.018, wz * 0.018, 4, 0.55, 2.0, 0.0045);
-        const ravineMask = Math.abs(this.noise.fbm2D(wx * 0.007 + 3000, wz * 0.007 - 3000, 4, 0.55, 2.0, 0.0025));
+  private generateOres(chunk: Chunk, worldX: number, worldZ: number): void {
+    const ores = [
+      { block: BlockType.COAL_ORE, minY: -64, maxY: 192, size: 8, count: 20, threshold: 0.68 },
+      { block: BlockType.IRON_ORE, minY: -128, maxY: 64, size: 7, count: 15, threshold: 0.72 },
+      { block: BlockType.GOLD_ORE, minY: -256, maxY: 32, size: 5, count: 9, threshold: 0.78 },
+      { block: BlockType.DIAMOND_ORE, minY: -480, maxY: -128, size: 4, count: 5, threshold: 0.86 },
+      { block: BlockType.EMERALD_ORE, minY: -320, maxY: -64, size: 3, count: 3, threshold: 0.92 },
+      { block: BlockType.LAPIS_ORE, minY: -192, maxY: 64, size: 6, count: 7, threshold: 0.76 },
+      { block: BlockType.REDSTONE_ORE, minY: -384, maxY: 0, size: 7, count: 12, threshold: 0.74 },
+      { block: BlockType.COPPER_ORE, minY: -64, maxY: 128, size: 9, count: 16, threshold: 0.70 },
+    ];
 
-        for (let y = 1; y < CHUNK_HEIGHT - 1; y++) {
-          const block = chunk.getBlock(x, y, z);
-          if (block === BlockType.BEDROCK || block === BlockType.WATER || block === BlockType.LAVA) continue;
+    for (const ore of ores) {
+      for (let i = 0; i < ore.count; i++) {
+        const rx = Math.floor(this.noise.fbm2D(worldX + i * 17, worldZ + i * 23, 1, 0.5, 2.0, 0.05) * CHUNK_SIZE);
+        const rz = Math.floor(this.noise.fbm2D(worldX + i * 31, worldZ + i * 41, 1, 0.5, 2.0, 0.05) * CHUNK_SIZE);
+        const ry = ore.minY + Math.floor(this.noise.fbm2D(worldX + i * 53, worldZ + i * 61, 1, 0.5, 2.0, 0.05) * (ore.maxY - ore.minY));
 
-          const tunnelNoise = this.noise.getCaveNoise(wx, y, wz);
-          const deepShaft = y > 18 && shaftMask > 0.955 && Math.abs(wx + wz) % 8 < 3;
-          const megaCavern =
-            y > 8 &&
-            y < 96 &&
-            cavernMask > 0.35 &&
-            tunnelNoise > 0.28;
-          const ravineCut =
-            y > 12 &&
-            y < 110 &&
-            ravineMask > 0.58 &&
-            Math.abs(wx - wz) % 13 < 4;
+        if (rx < 1 || rx >= CHUNK_SIZE - 1 || rz < 1 || rz >= CHUNK_SIZE - 1) continue;
 
-          if (deepShaft || megaCavern || ravineCut || tunnelNoise > 0.62) {
-            chunk.setBlock(x, y, z, BlockType.AIR);
+        const localY = worldYToLocalY(ry);
+        if (localY < 0 || localY >= CHUNK_HEIGHT) continue;
 
-            if (y <= 14 && (deepShaft || tunnelNoise > 0.72)) {
-              chunk.setBlock(x, y, z, BlockType.LAVA);
+        if (this.noise.fbm3D(worldX + rx, ry, worldZ + rz, 2, 0.5, 2.0, 0.1) > ore.threshold) {
+          for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+              for (let dz = -1; dz <= 1; dz++) {
+                const lx = rx + dx;
+                const ly = localY + dy;
+                const lz = rz + dz;
+                if (lx >= 0 && lx < CHUNK_SIZE && ly >= 0 && ly < CHUNK_HEIGHT && lz >= 0 && lz < CHUNK_SIZE) {
+                  if (this.noise.fbm3D(lx + i, ly, lz + i, 1, 0.5, 2.0, 0.2) < 0.65) {
+                    const current = chunk.getBlock(lx, ly, lz);
+                    if (current === BlockType.STONE || current === BlockType.DEEPSLATE || current === BlockType.TUFF) {
+                      chunk.setBlock(lx, ly, lz, ore.block);
+                    }
+                  }
+                }
+              }
             }
           }
         }
@@ -155,310 +146,392 @@ export class NewGenerationTerrainGenerator {
     }
   }
 
-  decorateSurface(chunk: Chunk, worldX: number, worldZ: number): void {
-    for (let x = 2; x < CHUNK_SIZE - 2; x++) {
-      for (let z = 2; z < CHUNK_SIZE - 2; z++) {
-        const wx = worldX + x;
-        const wz = worldZ + z;
-        const biome = this.getClassicSurfaceBiome(wx, wz);
-        const surfaceY = this.getSurfaceY(chunk, x, z);
-        if (surfaceY <= SEA_LEVEL) continue;
+  private getBlockForPoint(wx: number, worldY: number, wz: number, surfaceY: number, biome: BiomeType): BlockType {
+    if (worldY === MIN_WORLD_Y) return BlockType.BEDROCK;
 
-        const surfaceBlock = chunk.getBlock(x, surfaceY, z);
-        const isGrassSurface = surfaceBlock === BlockType.GRASS;
-        const isSandSurface = surfaceBlock === BlockType.SAND;
-        const isRedSandSurface = surfaceBlock === BlockType.RED_SAND;
-        if (!isGrassSurface && !isSandSurface && !isRedSandSurface) continue;
-
-        const coverN = this.hash3(wx * 3.1, 0, wz * 2.7);
-        const typeN = this.hash3(wx * 5.3, 1, wz * 7.1);
-        const spireN = this.hash3(wx * 0.013, 7, wz * 0.013);
-
-        if ((biome === BiomeType.MOUNTAINS || biome === BiomeType.MEGA_MOUNTAINS) && spireN > 0.985) {
-          const height = biome === BiomeType.MEGA_MOUNTAINS ? 10 + Math.floor(spireN * 14) : 6 + Math.floor(spireN * 10);
-          for (let i = 1; i <= height && surfaceY + i < CHUNK_HEIGHT; i++) {
-            const taper = Math.max(0, height - i);
-            chunk.setBlock(x, surfaceY + i, z, taper > 2 ? BlockType.STONE : BlockType.GRASS);
-          }
-          continue;
-        }
-
-        if (biome === BiomeType.VOLCANIC && spireN > 0.975) {
-          const height = 8 + Math.floor(spireN * 18);
-          for (let i = 1; i <= height && surfaceY + i < CHUNK_HEIGHT; i++) {
-            const block = i < height - 3 ? BlockType.BASALT : BlockType.OBSIDIAN;
-            chunk.setBlock(x, surfaceY + i, z, block);
-          }
-          if (surfaceY + height < CHUNK_HEIGHT) {
-            chunk.setBlock(x, surfaceY + height, z, BlockType.LAVA);
-          }
-          continue;
-        }
-
-        switch (biome) {
-          case BiomeType.PLAINS:
-          case BiomeType.SUNFLOWER_PLAINS: {
-            if (isGrassSurface && coverN < 0.35) {
-              const block = typeN < 0.65
-                ? BlockType.TALL_GRASS
-                : (this.hash3(wx * 7.3, 2, wz * 4.1) < 0.5 ? BlockType.FLOWER_RED : BlockType.FLOWER_YELLOW);
-              chunk.setBlock(x, surfaceY + 1, z, block);
-            }
-            break;
-          }
-          case BiomeType.FOREST:
-          case BiomeType.DARK_FOREST: {
-            if (isGrassSurface && coverN < 0.30) {
-              chunk.setBlock(x, surfaceY + 1, z, BlockType.TALL_GRASS);
-            } else if (isGrassSurface && coverN < 0.38) {
-              const flowerType = this.hash3(wx * 8.1, 3, wz * 5.3) < 0.5 ? BlockType.FLOWER_RED : BlockType.FLOWER_YELLOW;
-              chunk.setBlock(x, surfaceY + 1, z, flowerType);
-            }
-            break;
-          }
-          case BiomeType.JUNGLE: {
-            if (coverN < 0.55 && isGrassSurface) {
-              chunk.setBlock(x, surfaceY + 1, z, BlockType.TALL_GRASS);
-            } else if (coverN < 0.70 && this.hash3(wx * 4.4, 1, wz * 4.2) < 0.35) {
-              chunk.setBlock(x, surfaceY + 1, z, BlockType.VINE);
-            }
-            break;
-          }
-          case BiomeType.BADLANDS: {
-            if (coverN < 0.18) {
-              chunk.setBlock(x, surfaceY + 1, z, BlockType.DEAD_BUSH);
-            } else if (coverN < 0.26) {
-              chunk.setBlock(x, surfaceY + 1, z, BlockType.CACTUS);
-            }
-            break;
-          }
-          case BiomeType.SWAMP: {
-            if (isGrassSurface && coverN < 0.25) {
-              chunk.setBlock(x, surfaceY + 1, z, BlockType.TALL_GRASS);
-            }
-            break;
-          }
-          case BiomeType.TAIGA: {
-            if (isGrassSurface && coverN < 0.18) {
-              chunk.setBlock(x, surfaceY + 1, z, BlockType.TALL_GRASS);
-            } else if (coverN < 0.24 && surfaceY > SEA_LEVEL + 8) {
-              chunk.setBlock(x, surfaceY + 1, z, BlockType.SNOW);
-            }
-            break;
-          }
-          case BiomeType.SAVANNA: {
-            if (isGrassSurface && coverN < 0.20) {
-              chunk.setBlock(x, surfaceY + 1, z, BlockType.TALL_GRASS);
-            }
-            break;
-          }
-          case BiomeType.BEACH: {
-            if (isSandSurface && coverN < 0.12) {
-              chunk.setBlock(x, surfaceY + 1, z, BlockType.TALL_GRASS);
-            }
-            break;
-          }
-          case BiomeType.MEADOW: {
-            if (isGrassSurface && coverN < 0.4) {
-              const flowerType = this.hash3(wx * 11.4, 8, wz * 9.1) < 0.5 ? BlockType.FLOWER_RED : BlockType.FLOWER_YELLOW;
-              chunk.setBlock(x, surfaceY + 1, z, flowerType);
-            } else if (isGrassSurface && coverN < 0.62) {
-              chunk.setBlock(x, surfaceY + 1, z, BlockType.TALL_GRASS);
-            }
-            break;
-          }
-          case BiomeType.CHERRY_GROVE: {
-            if (coverN < 0.46 && isGrassSurface) {
-              const flowerType = this.hash3(wx * 9.6, 6, wz * 8.2) < 0.5 ? BlockType.FLOWER_TULIP_PINK : BlockType.FLOWER_ALLIUM;
-              chunk.setBlock(x, surfaceY + 1, z, flowerType);
-            } else if (coverN < 0.70 && isGrassSurface) {
-              chunk.setBlock(x, surfaceY + 1, z, BlockType.TALL_GRASS);
-            } else if (coverN < 0.82 && this.hash3(wx * 7.7, 2, wz * 6.8) < 0.4) {
-              chunk.setBlock(x, surfaceY + 1, z, BlockType.CHERRY_LEAVES);
-            }
-            break;
-          }
-          case BiomeType.SNOW:
-          case BiomeType.ICE_SPIKES: {
-            if (coverN < 0.22) {
-              chunk.setBlock(x, surfaceY + 1, z, BlockType.SNOW);
-            }
-            break;
-          }
-          case BiomeType.MUSHROOM_ISLAND: {
-            if (isGrassSurface && coverN < 0.32) {
-              chunk.setBlock(x, surfaceY + 1, z, this.hash3(wx * 5.5, 2, wz * 6.2) < 0.5 ? BlockType.MUSHROOM_RED : BlockType.MUSHROOM_BROWN);
-            }
-            break;
-          }
-          case BiomeType.MOUNTAINS:
-          case BiomeType.MEGA_MOUNTAINS: {
-            if (isGrassSurface && surfaceY < 90 && coverN < 0.10) {
-              const flowerType = this.hash3(wx * 9.2, 4, wz * 6.7) < 0.5 ? BlockType.FLOWER_RED : BlockType.FLOWER_YELLOW;
-              chunk.setBlock(x, surfaceY + 1, z, flowerType);
-            }
-            break;
-          }
-          default:
-            break;
-        }
-      }
+    if (worldY > surfaceY) {
+      return worldY <= SEA_LEVEL && surfaceY < SEA_LEVEL
+        ? this.isFrozen(biome) && worldY === SEA_LEVEL ? BlockType.ICE : BlockType.WATER
+        : BlockType.AIR;
     }
+
+    const config = this.getSurfaceConfig(biome);
+    const depth = surfaceY - worldY;
+
+    if (this.isCarvedCave(wx, worldY, wz, surfaceY, biome)) {
+      if (worldY <= MIN_WORLD_Y + 18) return BlockType.LAVA;
+      if (worldY < ABYSS_BAND_Y && this.noise.fbm3D(wx, worldY, wz, 2, 0.5, 2.0, 0.02) > 0.35) return BlockType.LAVA;
+      if (worldY <= SEA_LEVEL - 10 && worldY > DEEP_CAVE_BAND_Y && this.noise.fbm3D(wx, worldY, wz, 2, 0.5, 2.0, 0.015) > 0.48) return BlockType.WATER;
+      return BlockType.AIR;
+    }
+
+    if (depth === 0) {
+      if (biome === BiomeType.MEGA_MOUNTAINS && worldY > 520) return BlockType.SNOW;
+      if (biome === BiomeType.VOLCANIC && worldY > SEA_LEVEL + 40) return BlockType.OBSIDIAN;
+      return config.surface;
+    }
+
+    if (depth < 4) return config.subsurface;
+
+    if (worldY < DEEP_CAVE_BAND_Y) {
+      return biome === BiomeType.VOLCANIC ? BlockType.BASALT : (BlockType.DEEPSLATE ?? BlockType.STONE);
+    }
+
+    if (worldY < -96 && this.noise.fbm3D(wx, worldY, wz, 3, 0.55, 2.0, 0.025) > 0.62) {
+      return BlockType.TUFF ?? config.filler;
+    }
+
+    return config.filler;
   }
 
-  private getSurfaceY(chunk: Chunk, x: number, z: number): number {
-    for (let y = CHUNK_HEIGHT - 1; y >= 0; y--) {
-      if (chunk.getBlock(x, y, z) !== BlockType.AIR) return y;
+  private isCarvedCave(wx: number, worldY: number, wz: number, surfaceY: number, biome: BiomeType): boolean {
+    if (worldY >= surfaceY - 3) return false;
+
+    const tunnel = this.noise.getCaveNoise(wx, worldY, wz);
+    const cathedral = this.noise.fbm3D(wx * 0.6, worldY * 0.8, wz * 0.6, 4, 0.52, 2.0, 0.01);
+    const shafts = this.noise.fbm2D(wx * 0.004, wz * 0.004, 3, 0.55, 2.0, 0.002);
+    const abyss = this.noise.fbm3D(wx * 0.35, worldY * 0.6, wz * 0.35, 3, 0.5, 2.0, 0.008);
+    const river = 1 - Math.abs(this.noise.fbm2D(wx * 0.002 + 1400, wz * 0.002 - 1400, 3, 0.55, 2.0, 0.0015));
+
+    // Get cave thresholds from mythic biome config if available
+    let caveThresholds = { upper: 0.63, cathedral: 0.22, deep: 0.56, abyss: 0.12 };
+    const mythicId = MYTHIC_BIOME_BY_TERRAIN[biome];
+    if (mythicId && DEFAULT_BIOME_CONFIGS_V2[mythicId]) {
+      const biomeConfig = DEFAULT_BIOME_CONFIGS_V2[mythicId];
+      // Adjust thresholds based on biome erosion resistance
+      const erosionFactor = 1 - biomeConfig.terrain.erosionResistance;
+      caveThresholds.upper = 0.63 - (erosionFactor * 0.08);
+      caveThresholds.cathedral = 0.22 - (erosionFactor * 0.06);
+      caveThresholds.deep = 0.56 - (erosionFactor * 0.1);
+      caveThresholds.abyss = 0.12 - (erosionFactor * 0.04);
     }
-    return 0;
+
+    const upperCaves = worldY > -80 && tunnel > caveThresholds.upper;
+    const midCathedrals = worldY <= -80 && worldY > DEEP_CAVE_BAND_Y && cathedral > caveThresholds.cathedral;
+    const deepFaults = worldY <= DEEP_CAVE_BAND_Y && worldY > ABYSS_BAND_Y && (tunnel > caveThresholds.deep || cathedral > caveThresholds.cathedral * 0.45);
+    const abyssCaverns = worldY <= ABYSS_BAND_Y && abyss > caveThresholds.abyss;
+    const heroShaft = shafts > 0.7 && Math.abs((wx + wz) % 19) < 3;
+    const riverChasm = river > 0.88 && worldY > SEA_LEVEL - 120 && worldY < surfaceY - 8;
+
+    if (biome === BiomeType.VOLCANIC && worldY < SEA_LEVEL + 40 && tunnel > 0.52) return true;
+
+    return upperCaves || midCathedrals || deepFaults || abyssCaverns || heroShaft || riverChasm;
   }
 
   getBiome(worldX: number, worldZ: number): BiomeType {
-    const continental = this.noise.fbm2D(worldX, worldZ, 4, 0.5, 2.0, 0.0008);
-    const erosion = this.noise.fbm2D(worldX + 1000, worldZ - 1000, 3, 0.5, 2.0, 0.0012);
-    const weirdness = this.noise.fbm2D(worldX - 5000, worldZ + 5000, 3, 0.5, 2.0, 0.001);
     const temperature = this.noise.getTemperature(worldX, worldZ);
     const humidity = this.noise.getHumidity(worldX, worldZ);
+    const continentalness = this.noise.fbm2D(worldX, worldZ, 4, 0.5, 2.0, 0.00055);
+    const weirdness = this.noise.fbm2D(worldX + 2800, worldZ - 1800, 4, 0.5, 2.0, 0.0014);
+    const volcanic = this.noise.fbm2D(worldX - 7200, worldZ + 5100, 3, 0.55, 2.0, 0.0018);
 
-    if (continental < -0.48) return BiomeType.DEEP_OCEAN;
-    if (continental < -0.18) return BiomeType.OCEAN;
-    if (continental < 0.0) return BiomeType.BEACH;
-    if (temperature > 0.82 && humidity < 0.12) return BiomeType.BADLANDS;
-    if (temperature > 0.82 && humidity < 0.18) return BiomeType.DESERT;
-    if (temperature > 0.78 && humidity < 0.3) return BiomeType.SAVANNA;
-    if (temperature > 0.72 && humidity > 0.72) return BiomeType.JUNGLE;
-    if (temperature > 0.32 && temperature < 0.72 && humidity > 0.48 && humidity < 0.82 && continental > 0.15 && continental < 0.42) return BiomeType.MEADOW;
-    if (temperature > 0.28 && temperature < 0.58 && humidity > 0.48 && humidity < 0.82 && continental > 0.42) return BiomeType.CHERRY_GROVE;
-    if (humidity > 0.9 && temperature > 0.25 && temperature < 0.7 && continental > 0.12) return BiomeType.MUSHROOM_ISLAND;
-    if (temperature < 0.2 && humidity > 0.55) return BiomeType.SNOW;
-    if (temperature < 0.12 && humidity > 0.7) return BiomeType.ICE_SPIKES;
-    if (weirdness > 0.45 && continental > 0.2) return BiomeType.MOUNTAINS;
-    if (weirdness > 0.6 && continental > 0.45) return BiomeType.MEGA_MOUNTAINS;
-    if (humidity > 0.78 && temperature > 0.45 && temperature < 0.75) return BiomeType.SWAMP;
-    if (humidity > 0.68 && temperature < 0.45) return BiomeType.TAIGA;
-    if (humidity > 0.58 && temperature < 0.65) return BiomeType.FOREST;
-    if (erosion > 0.5 && temperature < 0.65) return BiomeType.DARK_FOREST;
+    if (continentalness < -0.55) return BiomeType.DEEP_OCEAN;
+    if (continentalness < -0.18) return BiomeType.OCEAN;
+    if (continentalness < -0.08) return BiomeType.BEACH;
+    if (volcanic > 0.62 && temperature > 0.7) return BiomeType.VOLCANIC;
+    if (weirdness > 0.56 && continentalness > 0.2) return BiomeType.MEGA_MOUNTAINS;
+    if (weirdness > 0.32 && continentalness > 0.08) return BiomeType.MOUNTAINS;
+    if (temperature < 0.18 && humidity > 0.58) return BiomeType.SNOW;
+    if (temperature > 0.8 && humidity < 0.2) return BiomeType.BADLANDS;
+    if (temperature > 0.72 && humidity < 0.28) return BiomeType.DESERT;
+    if (temperature > 0.66 && humidity > 0.72) return BiomeType.JUNGLE;
+    if (humidity > 0.78 && temperature > 0.35 && temperature < 0.7) return BiomeType.SWAMP;
+    if (temperature < 0.32 && humidity > 0.45) return BiomeType.TAIGA;
+    if (humidity > 0.62 && continentalness > 0.18) return BiomeType.FOREST;
+    if (continentalness > 0.38 && temperature > 0.22 && temperature < 0.62) return BiomeType.MEADOW;
     return BiomeType.PLAINS;
   }
 
-  private getClassicSurfaceBiome(worldX: number, worldZ: number): BiomeType {
-    const warpX = this.noise.fbm2D(worldX + 811, worldZ - 377, 2, 0.5, 2.0, 0.0016) * 220;
-    const warpZ = this.noise.fbm2D(worldX - 193, worldZ + 547, 2, 0.5, 2.0, 0.0016) * 220;
-    const temp = this.noise.getTemperature(worldX + warpX, worldZ + warpZ);
-    const hum = this.noise.getHumidity(worldX - warpZ, worldZ + warpX);
-    const cont = this.noise.fbm2D(worldX, worldZ, 3, 0.5, 2.0, 0.0006);
-
-    if (cont < -0.3) return BiomeType.DEEP_OCEAN;
-    if (cont < -0.05) return BiomeType.OCEAN;
-    if (cont < 0.02) return BiomeType.BEACH;
-
-    let best = BiomeType.PLAINS;
-    let bestScore = -1;
-    for (const [type, cfg] of Object.entries({
-      [BiomeType.PLAINS]: { tempRange: [0.35, 0.65], humRange: [0.25, 0.55] },
-      [BiomeType.SUNFLOWER_PLAINS]: { tempRange: [0.45, 0.70], humRange: [0.20, 0.45] },
-      [BiomeType.FOREST]: { tempRange: [0.30, 0.60], humRange: [0.55, 0.90] },
-      [BiomeType.DARK_FOREST]: { tempRange: [0.25, 0.55], humRange: [0.60, 0.95] },
-      [BiomeType.DESERT]: { tempRange: [0.72, 1.0], humRange: [0.0, 0.20] },
-      [BiomeType.BADLANDS]: { tempRange: [0.80, 1.0], humRange: [0.0, 0.15] },
-      [BiomeType.BEACH]: { tempRange: [0.25, 0.85], humRange: [0.15, 0.85] },
-      [BiomeType.SNOW]: { tempRange: [0.0, 0.22], humRange: [0.30, 0.70] },
-      [BiomeType.ICE_SPIKES]: { tempRange: [0.0, 0.15], humRange: [0.60, 1.0] },
-      [BiomeType.JUNGLE]: { tempRange: [0.65, 1.0], humRange: [0.72, 1.0] },
-      [BiomeType.MOUNTAINS]: { tempRange: [0.10, 0.50], humRange: [0.20, 0.60] },
-      [BiomeType.MEGA_MOUNTAINS]: { tempRange: [0.0, 0.30], humRange: [0.10, 0.50] },
-      [BiomeType.SWAMP]: { tempRange: [0.40, 0.70], humRange: [0.80, 1.0] },
-      [BiomeType.TAIGA]: { tempRange: [0.08, 0.30], humRange: [0.40, 0.70] },
-      [BiomeType.SAVANNA]: { tempRange: [0.62, 0.88], humRange: [0.10, 0.38] },
-      [BiomeType.MUSHROOM]: { tempRange: [0.30, 0.60], humRange: [0.90, 1.0] },
-      [BiomeType.MEADOW]: { tempRange: [0.25, 0.70], humRange: [0.45, 0.85] },
-      [BiomeType.CHERRY_GROVE]: { tempRange: [0.28, 0.58], humRange: [0.45, 0.78] },
-      [BiomeType.ORANGE_GROVE]: { tempRange: [0.55, 0.80], humRange: [0.35, 0.60] },
-      [BiomeType.MUSHROOM_ISLAND]: { tempRange: [0.30, 0.60], humRange: [0.88, 1.0] },
-      [BiomeType.VOLCANIC]: { tempRange: [0.85, 1.0], humRange: [0.60, 1.0] },
-    } as Record<BiomeType, { tempRange: [number, number]; humRange: [number, number] }>)) {
-      const t0 = cfg.tempRange[0];
-      const t1 = cfg.tempRange[1];
-      const h0 = cfg.humRange[0];
-      const h1 = cfg.humRange[1];
-      const ts = Math.max(0, 1 - Math.abs(temp - (t0 + t1) / 2) / ((t1 - t0) / 2));
-      const hs = Math.max(0, 1 - Math.abs(hum - (h0 + h1) / 2) / ((h1 - h0) / 2));
-      const sc = ts * hs;
-      if (sc > bestScore) {
-        bestScore = sc;
-        best = type as BiomeType;
-      }
-    }
-
-    return best;
-  }
-
   private getSurfaceHeight(worldX: number, worldZ: number, biome: BiomeType): number {
-    const continent = this.noise.fbm2D(worldX, worldZ, 5, 0.5, 2.0, 0.00045);
-    const hills = this.noise.fbm2D(worldX, worldZ, 5, 0.5, 2.0, 0.008);
-    const detail = this.noise.fbm2D(worldX, worldZ, 4, 0.5, 2.0, 0.022);
-    const ridges = 1 - Math.abs(this.noise.fbm2D(worldX + 240, worldZ - 240, 4, 0.55, 2.0, 0.008));
-    const spikes = Math.max(0, this.noise.fbm2D(worldX - 1800, worldZ + 2200, 4, 0.55, 2.0, 0.014));
-    const basin = Math.abs(this.noise.fbm2D(worldX + 8000, worldZ - 5000, 3, 0.5, 2.0, 0.0022));
-    const terraces = Math.floor((64 + continent * 30 + hills * 16 + detail * 8) / 3) * 3;
+    const continentalness = this.noise.fbm2D(worldX, worldZ, 5, 0.5, 2.0, 0.00042);
+    const erosion = this.noise.fbm2D(worldX + 4100, worldZ - 1700, 4, 0.5, 2.0, 0.0011);
+    const peaksValleys = this.noise.fbm2D(worldX - 5100, worldZ + 3300, 4, 0.5, 2.0, 0.0016);
+    const ridgeSharpness = 1 - Math.abs(this.noise.fbm2D(worldX * 0.8, worldZ * 0.8, 4, 0.55, 2.0, 0.003));
+    const weirdness = this.noise.fbm2D(worldX + 9000, worldZ - 9000, 3, 0.5, 2.0, 0.0038);
+    const volcanic = this.noise.fbm2D(worldX - 7200, worldZ + 5100, 3, 0.55, 2.0, 0.0018);
+    const ancientDepth = this.noise.fbm2D(worldX + 13000, worldZ + 8000, 3, 0.5, 2.0, 0.0009);
 
-    let base = terraces + ridges * 22 + spikes * 24 + 4;
-    if (biome === BiomeType.MOUNTAINS) base += ridges * 30 + spikes * 18;
-    if (biome === BiomeType.MEGA_MOUNTAINS) base += ridges * 52 + spikes * 24;
-    if (biome === BiomeType.OCEAN) base -= 18;
-    if (biome === BiomeType.DEEP_OCEAN) base -= 34;
-    if (biome === BiomeType.BEACH) base -= 6;
-    if (biome === BiomeType.SWAMP) base -= 5;
-    if (biome === BiomeType.MEADOW) base += ridges * 4 + spikes * 3;
-    if (biome === BiomeType.CHERRY_GROVE) base += ridges * 5 + spikes * 4;
-    if (biome === BiomeType.MUSHROOM_ISLAND) base += 2;
-    if (biome === BiomeType.VOLCANIC) base += ridges * 20 + spikes * 14;
-    if (biome === BiomeType.DESERT || biome === BiomeType.BADLANDS) base += basin > 0.7 ? 8 : -2;
+    let base = SEA_LEVEL + continentalness * 180;
 
-    const riverBand = this.noise.fbm2D(worldX * 0.0018 + 4100, worldZ * 0.0018 - 4100, 4, 0.55, 2.0, 0.0012);
-    const river = 1 - Math.abs(riverBand);
-    const pond = this.noise.fbm2D(worldX * 0.0105 - 900, worldZ * 0.0105 + 900, 3, 0.55, 2.0, 0.0085);
-    if (biome !== BiomeType.DESERT && biome !== BiomeType.BADLANDS && biome !== BiomeType.VOLCANIC) {
-      if (river > 0.86) base = Math.min(base, SEA_LEVEL - 1 - Math.floor((river - 0.86) * 16));
-      else if (pond > 0.72) base = Math.min(base, SEA_LEVEL - 2 - Math.floor((pond - 0.72) * 10));
-    }
+    // Apply BiomeConfigV2 terrain parameters
+    const mythicId = MYTHIC_BIOME_BY_TERRAIN[biome];
+    if (mythicId && DEFAULT_BIOME_CONFIGS_V2[mythicId]) {
+      const biomeConfig = DEFAULT_BIOME_CONFIGS_V2[mythicId];
+      const { terrain } = biomeConfig;
 
-    const sinkhole = Math.max(0, basin - 0.68) * 42;
-    const rough = this.noise.fbm2D(worldX, worldZ, 3, 0.5, 2.0, 0.03) * 4;
+      base += terrain.baseHeight;
+      base += peaksValleys * terrain.heightVariance;
+      base += Math.max(0, peaksValleys) * terrain.mountainBoost;
+      base += ridgeSharpness * ridgeSharpness * terrain.cliffBias * 134;
+      base += erosion * (52 * (1 - terrain.erosionResistance));
+      base += weirdness * 28;
+    } else {
+      // Fallback for biomes without mythic config
+      base += erosion * 52;
+      base += peaksValleys * 34;
+      base += ridgeSharpness * ridgeSharpness * 110;
+      base += weirdness * 28;
 
-    return Math.max(2, Math.min(CHUNK_HEIGHT - 4, Math.floor(base + rough - sinkhole)));
-  }
-
-  private getBlendedSurfaceHeight(worldX: number, worldZ: number): number {
-    const BLEND_R = 18;
-    let totalHeight = 0;
-    let totalWeight = 0;
-
-    for (let sx = -BLEND_R; sx <= BLEND_R; sx += 4) {
-      for (let sz = -BLEND_R; sz <= BLEND_R; sz += 4) {
-        const dist = Math.sqrt(sx * sx + sz * sz);
-        const weight = Math.exp(-(dist * dist) / (BLEND_R * BLEND_R * 0.5));
-        const sampleX = worldX + sx;
-        const sampleZ = worldZ + sz;
-        const biome = this.getBiome(sampleX, sampleZ);
-        const baseHeight = this.getSurfaceHeight(sampleX, sampleZ, biome);
-        const cliffMask = Math.abs(this.noise.fbm2D(sampleX, sampleZ, 4, 0.55, 2.0, 0.02));
-        const dramaticBoost =
-          biome === BiomeType.MOUNTAINS ? cliffMask * 10 :
-          biome === BiomeType.MEGA_MOUNTAINS ? cliffMask * 18 :
-          biome === BiomeType.VOLCANIC ? cliffMask * 8 :
-          0;
-        totalHeight += (baseHeight + dramaticBoost) * weight;
-        totalWeight += weight;
+      if (biome === BiomeType.MOUNTAINS) {
+        base += 180 + Math.max(0, peaksValleys) * 160 + ridgeSharpness * 90;
+      } else if (biome === BiomeType.MEGA_MOUNTAINS) {
+        base += 290 + Math.max(0, peaksValleys) * 240 + ridgeSharpness * 150;
+      } else if (biome === BiomeType.VOLCANIC) {
+        base += 120 + volcanic * 180 + ridgeSharpness * 70;
+      } else if (biome === BiomeType.DEEP_OCEAN) {
+        base -= 240 + ancientDepth * 120;
+      } else if (biome === BiomeType.OCEAN) {
+        base -= 120;
+      } else if (biome === BiomeType.BEACH || biome === BiomeType.SWAMP) {
+        base -= 32;
+      } else if (biome === BiomeType.MEADOW) {
+        base += 48;
       }
     }
 
-    return Math.max(2, Math.min(CHUNK_HEIGHT - 4, Math.floor(totalHeight / totalWeight)));
+    const heroZone = this.noise.fbm2D(worldX - 15000, worldZ + 11000, 2, 0.55, 2.0, 0.00035);
+    if (heroZone > 0.72) {
+      base += 80 + ridgeSharpness * 140;
+    } else if (heroZone < -0.74) {
+      base -= 120;
+    }
+
+    return Math.max(MIN_WORLD_Y + 8, Math.min(MAX_WORLD_Y - 8, Math.floor(base)));
+  }
+
+  private decorateSurface(
+    chunk: Chunk,
+    worldX: number,
+    worldZ: number,
+    surfaceHeights: number[][],
+    biomes: BiomeType[][]
+  ): void {
+    for (let x = 1; x < CHUNK_SIZE - 1; x++) {
+      for (let z = 1; z < CHUNK_SIZE - 1; z++) {
+        const wx = worldX + x;
+        const wz = worldZ + z;
+        const surfaceY = surfaceHeights[x][z];
+        const biome = biomes[x][z];
+        if (surfaceY <= SEA_LEVEL || surfaceY >= SURFACE_BAND_MAX_Y + 220) continue;
+
+        const localSurfaceY = worldYToLocalY(surfaceY);
+        const placeY = localSurfaceY + 1;
+        if (placeY >= CHUNK_HEIGHT) continue;
+
+        const coverNoise = this.noise.fbm2D(wx * 0.03, wz * 0.03, 2, 0.5, 2.0, 0.02);
+        const spireNoise = this.noise.fbm2D(wx * 0.009, wz * 0.009, 2, 0.5, 2.0, 0.006);
+        const treeNoise = this.noise.fbm2D(wx * 0.008, wz * 0.008, 3, 0.5, 2.0, 0.007);
+
+        if ((biome === BiomeType.MOUNTAINS || biome === BiomeType.MEGA_MOUNTAINS) && spireNoise > 0.76) {
+          const height = biome === BiomeType.MEGA_MOUNTAINS ? 20 : 12;
+          for (let i = 1; i <= height && placeY + i < CHUNK_HEIGHT; i++) {
+            chunk.setBlock(x, placeY + i - 1, z, i < height - 2 ? BlockType.STONE : BlockType.SNOW);
+          }
+          continue;
+        }
+
+        if (biome === BiomeType.VOLCANIC && spireNoise > 0.7) {
+          const height = 16;
+          for (let i = 1; i <= height && placeY + i < CHUNK_HEIGHT; i++) {
+            chunk.setBlock(x, placeY + i - 1, z, i < height - 3 ? BlockType.BASALT : BlockType.OBSIDIAN);
+          }
+          continue;
+        }
+
+        // Tree placement
+        let treeType: string | null = null;
+        if (treeNoise > 0.78) {
+          switch (biome) {
+            case BiomeType.FOREST: treeType = 'oak'; break;
+            case BiomeType.DARK_FOREST: treeType = 'dark_oak'; break;
+            case BiomeType.JUNGLE: treeType = 'jungle'; break;
+            case BiomeType.TAIGA: treeType = 'spruce'; break;
+            case BiomeType.MEADOW: treeType = this.noise.fbm2D(wx, wz, 1, 0.5, 2.0, 0.1) > 0.5 ? 'birch' : 'oak'; break;
+            case BiomeType.CHERRY_GROVE: treeType = 'cherry'; break;
+            case BiomeType.DESERT: treeType = 'cactus'; break;
+            case BiomeType.SAVANNA: treeType = 'acacia'; break;
+            case BiomeType.ORANGE_GROVE: treeType = 'orange'; break;
+          }
+        }
+
+        if (treeType && x >= 2 && x <= CHUNK_SIZE - 3 && z >= 2 && z <= CHUNK_SIZE - 3) {
+          this.placeTree(chunk, x, placeY, z, treeType, wx, wz);
+          continue;
+        }
+
+        if (coverNoise > 0.42 && coverNoise < 0.52) {
+          chunk.setBlock(x, placeY, z, biome === BiomeType.SNOW ? BlockType.SNOW : BlockType.TALL_GRASS);
+        } else if (coverNoise > 0.6 && biome !== BiomeType.DESERT && biome !== BiomeType.BADLANDS) {
+          chunk.setBlock(x, placeY, z, coverNoise > 0.72 ? BlockType.FLOWER_RED : BlockType.FLOWER_YELLOW);
+        }
+      }
+    }
   }
 
   private hash3(x: number, y: number, z: number): number {
-    const n = Math.sin(x * 127.1 + y * 311.7 + z * 74.3) * 43758.5453;
-    return n - Math.floor(n);
+    let h = x * 12.9898 + y * 78.233 + z * 37.719;
+    h = Math.sin(h) * 43758.5453;
+    return h - Math.floor(h);
+  }
+
+  private placeTree(chunk: Chunk, x: number, y: number, z: number, type: string, wx: number, wz: number): void {
+    if (x < 2 || x >= CHUNK_SIZE - 2 || z < 2 || z >= CHUNK_SIZE - 2) return;
+    if (y >= CHUNK_HEIGHT - 12) return;
+    const seed = this.hash3(wx * 0.91, y * 0.13, wz * 0.73);
+    switch (type) {
+      case 'oak': this.oakTree(chunk, x, y, z, seed); break;
+      case 'birch': this.birchTree(chunk, x, y, z, seed); break;
+      case 'spruce': this.spruceTree(chunk, x, y, z, seed); break;
+      case 'jungle': this.jungleTree(chunk, x, y, z, seed); break;
+      case 'acacia': this.acaciaTree(chunk, x, y, z, seed); break;
+      case 'dark_oak': this.darkOakTree(chunk, x, y, z, seed); break;
+      case 'cherry': this.cherryTree(chunk, x, y, z, seed); break;
+      case 'orange': this.orangeTree(chunk, x, y, z, seed); break;
+      case 'cactus': this.cactus(chunk, x, y, z, seed); break;
+    }
+  }
+
+  private leaf(chunk: Chunk, lx: number, ly: number, lz: number, type: BlockType): void {
+    if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE) return;
+    if (ly < 0 || ly >= CHUNK_HEIGHT) return;
+    if (chunk.getBlock(lx, ly, lz) === BlockType.AIR) chunk.setBlock(lx, ly, lz, type);
+  }
+
+  private leafSphere(
+    chunk: Chunk, cx: number, cy: number, cz: number,
+    rx: number, ry: number, rz: number, type: BlockType, seed: number
+  ): void {
+    const sx = 0.9 + this.hash3(seed * 17.1, cy, cx) * 0.35;
+    const sy = 0.8 + this.hash3(seed * 31.7, cz, cy) * 0.4;
+    const sz = 0.9 + this.hash3(seed * 47.3, cx, cz) * 0.35;
+    const trim = 0.18 + this.hash3(seed * 59.9, cx + cy, cz) * 0.2;
+
+    for (let dy = -ry; dy <= ry; dy++) {
+      for (let dx = -rx; dx <= rx; dx++) {
+        for (let dz = -rz; dz <= rz; dz++) {
+          const d = (dx * dx) / (rx * rx * sx) + (dy * dy) / (ry * ry * sy) + (dz * dz) / (rz * rz * sz);
+          if (d > 1.0) continue;
+          if (d > 0.72 && this.hash3(cx + dx + seed, cy + dy, cz + dz) < trim) continue;
+          this.leaf(chunk, cx + dx, cy + dy, cz + dz, type);
+        }
+      }
+    }
+  }
+
+  private drapeLeaves(
+    chunk: Chunk, cx: number, cy: number, cz: number,
+    radius: number, maxDrop: number, type: BlockType, seed: number
+  ): void {
+    for (let dx = -radius; dx <= radius; dx++) {
+      for (let dz = -radius; dz <= radius; dz++) {
+        if (Math.abs(dx) + Math.abs(dz) < radius) continue;
+        if (this.hash3(seed * 13.1, cx + dx, cz + dz) < 0.45) continue;
+        const dropLen = 1 + Math.floor(this.hash3(seed * 29.3, cy, cz + dz) * maxDrop);
+        for (let d = 0; d < dropLen; d++) {
+          this.leaf(chunk, cx + dx, cy - d, cz + dz, type);
+        }
+      }
+    }
+  }
+
+  private oakTree(chunk: Chunk, x: number, y: number, z: number, seed: number): void {
+    const h = 5 + Math.floor(seed * 3);
+    for (let i = 0; i < h; i++) chunk.setBlock(x, y + i, z, BlockType.OAK_LOG);
+    const cy = y + h;
+    const r = 2 + (seed > 0.4 ? 1 : 0);
+    this.leafSphere(chunk, x, cy - 1, z, r, 2, r, BlockType.OAK_LEAVES, seed * 997);
+    this.leafSphere(chunk, x, cy, z, r + 1, 2, r + 1, BlockType.OAK_LEAVES, seed * 1231);
+    this.leafSphere(chunk, x, cy + 1, z, 2, 1, 2, BlockType.OAK_LEAVES, seed * 1459);
+    this.drapeLeaves(chunk, x, cy, z, r + 1, 2, BlockType.OAK_LEAVES, seed * 1777);
+  }
+
+  private birchTree(chunk: Chunk, x: number, y: number, z: number, seed: number): void {
+    const h = 6 + Math.floor(seed * 4);
+    for (let i = 0; i < h; i++) chunk.setBlock(x, y + i, z, BlockType.BIRCH_LOG);
+    const cy = y + h;
+    this.leafSphere(chunk, x, cy - 2, z, 2, 2, 2, BlockType.BIRCH_LEAVES, seed * 997);
+    this.leafSphere(chunk, x, cy, z, 2, 2, 2, BlockType.BIRCH_LEAVES, seed * 1231);
+    this.drapeLeaves(chunk, x, cy, z, 2, 3, BlockType.BIRCH_LEAVES, seed * 1777);
+  }
+
+  private spruceTree(chunk: Chunk, x: number, y: number, z: number, seed: number): void {
+    const h = 7 + Math.floor(seed * 6);
+    for (let i = 0; i < h; i++) chunk.setBlock(x, y + i, z, BlockType.SPRUCE_LOG);
+    for (let layer = 0; layer < 5; layer++) {
+      const ly = y + h - 4 + layer;
+      const r = Math.max(1, 3 - layer);
+      this.leafSphere(chunk, x, ly, z, r, 1, r, BlockType.SPRUCE_LEAVES, seed * (1000 + layer * 100));
+    }
+    chunk.setBlock(x, y + h, z, BlockType.SPRUCE_LEAVES);
+  }
+
+  private jungleTree(chunk: Chunk, x: number, y: number, z: number, seed: number): void {
+    const h = 9 + Math.floor(seed * 5);
+    for (let i = 0; i < h; i++) chunk.setBlock(x, y + i, z, BlockType.JUNGLE_LOG);
+    const cy = y + h;
+    this.leafSphere(chunk, x, cy - 2, z, 3, 2, 3, BlockType.JUNGLE_LEAVES, seed * 997);
+    this.leafSphere(chunk, x, cy, z, 2, 2, 2, BlockType.JUNGLE_LEAVES, seed * 1231);
+  }
+
+  private acaciaTree(chunk: Chunk, x: number, y: number, z: number, seed: number): void {
+    const h = 4 + Math.floor(seed * 3);
+    for (let i = 0; i < h; i++) chunk.setBlock(x, y + i, z, BlockType.ACACIA_LOG);
+    const cy = y + h;
+    this.leafSphere(chunk, x, cy, z, 3, 2, 3, BlockType.ACACIA_LEAVES, seed * 997);
+  }
+
+  private darkOakTree(chunk: Chunk, x: number, y: number, z: number, seed: number): void {
+    const h = 6 + Math.floor(seed * 3);
+    for (let i = 0; i < h; i++) chunk.setBlock(x, y + i, z, BlockType.DARK_OAK_LOG);
+    const cy = y + h;
+    this.leafSphere(chunk, x, cy - 1, z, 3, 2, 3, BlockType.DARK_OAK_LEAVES, seed * 997);
+    this.leafSphere(chunk, x, cy + 1, z, 2, 1, 2, BlockType.DARK_OAK_LEAVES, seed * 1231);
+  }
+
+  private cherryTree(chunk: Chunk, x: number, y: number, z: number, seed: number): void {
+    const h = 5 + Math.floor(seed * 3);
+    for (let i = 0; i < h; i++) chunk.setBlock(x, y + i, z, BlockType.CHERRY_LOG);
+    const cy = y + h;
+    this.leafSphere(chunk, x, cy - 1, z, 3, 2, 3, BlockType.CHERRY_LEAVES, seed * 997);
+    this.leafSphere(chunk, x, cy, z, 2, 2, 2, BlockType.CHERRY_LEAVES, seed * 1231);
+    this.drapeLeaves(chunk, x, cy, z, 3, 2, BlockType.CHERRY_LEAVES, seed * 1777);
+  }
+
+  private orangeTree(chunk: Chunk, x: number, y: number, z: number, seed: number): void {
+    const h = 5 + Math.floor(seed * 2);
+    for (let i = 0; i < h; i++) chunk.setBlock(x, y + i, z, BlockType.OAK_LOG);
+    const cy = y + h;
+    this.leafSphere(chunk, x, cy - 1, z, 3, 2, 3, BlockType.OAK_LEAVES, seed * 997);
+    this.leafSphere(chunk, x, cy, z, 2, 1, 2, BlockType.OAK_LEAVES, seed * 1231);
+  }
+
+  private cactus(chunk: Chunk, x: number, y: number, z: number, seed: number): void {
+    const h = 2 + Math.floor(seed * 3);
+    for (let i = 0; i < h; i++) {
+      chunk.setBlock(x, y + i, z, BlockType.CACTUS);
+    }
+  }
+
+  private isFrozen(biome: BiomeType): boolean {
+    return biome === BiomeType.SNOW || biome === BiomeType.ICE_SPIKES;
+  }
+
+  private getSurfaceConfig(biome: BiomeType): SurfaceBiomeConfig {
+    const mythicId = MYTHIC_BIOME_BY_TERRAIN[biome];
+    if (!mythicId) {
+      return SURFACE_BIOMES[biome];
+    }
+
+    const mythic = DEFAULT_BIOME_CONFIGS_V2[mythicId];
+    if (!mythic) {
+      return SURFACE_BIOMES[biome];
+    }
+
+    return {
+      surface: mythic.surface.top,
+      subsurface: mythic.surface.subsurface,
+      filler: mythic.surface.filler,
+    };
   }
 }
 

@@ -1,8 +1,14 @@
 // World constants
 export const CHUNK_SIZE = 16;
-export const CHUNK_HEIGHT = 256;
-export const WORLD_HEIGHT = 256;
-export const SEA_LEVEL = 62;
+export const MIN_WORLD_Y = -640;
+export const MAX_WORLD_Y = 832;
+export const WORLD_HEIGHT = MAX_WORLD_Y - MIN_WORLD_Y;
+export const CHUNK_HEIGHT = WORLD_HEIGHT;
+export const SEA_LEVEL = -64;
+export const SURFACE_BAND_MIN_Y = -32;
+export const SURFACE_BAND_MAX_Y = 256;
+export const DEEP_CAVE_BAND_Y = -224;
+export const ABYSS_BAND_Y = -480;
 export const RENDER_DISTANCE = 32; // Increased from 16 for better visibility
 
 // Player constants - IMPROVED for better Minecraft feel

@@ -34,15 +34,11 @@ export default function World() {
     Math.max(MIN_EFFECTIVE_RENDER_DISTANCE, useGameStore.getState().renderDistance)
   );
 
-  const setPosition    = usePlayerStore((state) => state.setPosition);
   const worldSeed      = useGameStore((state) => state.worldSeed);
   const worldGenerationMode = useGameStore((state) => state.worldGenerationMode);
   const worldInitMode  = useGameStore((state) => state.worldInitMode);
   const renderDistance = useGameStore((state) => state.renderDistance);
   const gameState      = useGameStore((state) => state.gameState);
-  const setLoading     = useGameStore((state) => state.setLoading);
-  const setGameState   = useGameStore((state) => state.setGameState);
-
   const loadedChunks   = useWorldStore((state) => state.loadedChunks);
   const loadedChunkVersion = useWorldStore((state) => state.loadedChunkVersion);
   const dirtyChunkVersion = useWorldStore((state) => state.dirtyChunkVersion);
@@ -95,7 +91,7 @@ export default function World() {
           searchRadius: 128, // Larger search to find proper terrain
           requireLoadedChunks: true,
           allowFallback: true,
-          fallbackY: 64,
+          fallbackY: SEA_LEVEL + 8,
         });
         
         // If spawn is not found or is in water, try again with less strict requirements
@@ -106,7 +102,7 @@ export default function World() {
             searchRadius: 256, // Even larger search
             requireLoadedChunks: false, // Don't require loaded chunks
             allowFallback: true,
-            fallbackY: 70, // Try to find above water
+            fallbackY: SEA_LEVEL + 12, // Keep fallback above water level in ocean biomes
           });
           if (retrySpawn) {
             resolvedSpawn = retrySpawn;
@@ -115,7 +111,7 @@ export default function World() {
 
         finalPosition = resolvedSpawn?.position ?? {
           x: spawnAnchor.x + 0.5,
-          y: 64, // Use sea level as fallback
+          y: SEA_LEVEL + 8,
           z: spawnAnchor.z + 0.5,
         };
 
@@ -131,7 +127,7 @@ export default function World() {
           searchRadius: 64,
           requireLoadedChunks: true,
           allowFallback: true,
-          fallbackY: 64,
+          fallbackY: SEA_LEVEL + 8,
         });
 
         if (recoveredSpawn) {
@@ -226,14 +222,14 @@ export default function World() {
       // Queue exist - throttle more to process queue
       const queueSize = manager.getQueueSize();
       if (queueSize > 20) {
-        intervalMs = 80; // Reduced from 300 - faster loading when behind
+        intervalMs = 80;
       } else if (queueSize > 10) {
-        intervalMs = 50; // Reduced from 200 - faster loading
+        intervalMs = 50;
       } else {
-        intervalMs = 30; // Reduced from 150 - responsive loading
+        intervalMs = 30;
       }
     } else {
-      intervalMs = chunkChanged ? 50 : 100; // Much faster updates
+      intervalMs = chunkChanged ? 50 : 100;
     }
     
     if (now - lastUpdateRef.current < intervalMs) return;

@@ -8,6 +8,7 @@ import { BlockType, BLOCKS, isLiquid } from '@/data/blocks';
 import { CHUNK_SIZE, CHUNK_HEIGHT, RENDER_DISTANCE } from '@/utils/constants';
 import { getBlockFromChunk } from '@/stores/worldStore';
 import { textureManager } from '@/data/textureManager';
+import { heightMapWorldYToLocalY } from '@/utils/coordinates';
 
 interface ChunkProps {
   x: number;
@@ -285,7 +286,7 @@ export default function OptimizedChunk({ x, z, version }: ChunkProps) {
         // Limit vertical scan to column surface + headroom.
         // This avoids scanning all 256 levels for each column.
         const columnIndex = lz * CHUNK_SIZE + lx;
-        const maxY = Math.min(CHUNK_HEIGHT - 1, chunk.heightMap[columnIndex] + 20);
+        const maxY = Math.min(CHUNK_HEIGHT - 1, heightMapWorldYToLocalY(chunk.heightMap[columnIndex]) + 20);
         for (let y = maxY; y >= 0; y--) {
           const bt = getBlockFromChunk(chunk, lx, y, lz);
           if (bt === BlockType.AIR) continue;

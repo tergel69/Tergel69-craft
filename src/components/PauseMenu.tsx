@@ -11,6 +11,8 @@ import { usePlayerStore } from '@/stores/playerStore';
 import { useInventoryStore } from '@/stores/inventoryStore';
 import { useWorldStore } from '@/stores/worldStore';
 import { normalizeMouseSensitivity } from '@/stores/gameStore';
+import { worldStorage } from '@/engine/WorldStorage';
+import { resetChunkManager } from '@/engine/ChunkManager';
 
 type Tab = 'pause' | 'settings';
 
@@ -20,12 +22,16 @@ export function PauseMenu() {
   const worldName    = useGameStore(s => s.worldName);
   const gameMode     = useGameStore(s => s.gameMode);
   const worldTime    = useGameStore(s => s.worldTime);
+  const saveCurrentWorld = useGameStore(s => s.saveCurrentWorld);
   const mouseSens    = useGameStore(s => normalizeMouseSensitivity(s.mouseSensitivity));
   const setMouseSens = useGameStore(s => s.setMouseSensitivity);
   const fov          = useGameStore(s => s.fov);
   const setFov       = useGameStore(s => s.setFov);
   const renderDist   = useGameStore(s => s.renderDistance);
   const setRenderDist= useGameStore(s => s.setRenderDistance);
+  const playerPosition = usePlayerStore(s => s.position);
+  const playerRotation = usePlayerStore(s => s.rotation);
+  const worldModifications = useWorldStore(s => s.modifications);
 
   const [tab, setTab] = useState<Tab>('pause');
   const [saving, setSaving] = useState(false);
@@ -51,18 +57,34 @@ export function PauseMenu() {
   const saveGame = async () => {
     setSaving(true);
     try {
-      const { worldManager } = await import('@/utils/WorldManager');
-      await worldManager.manualSave?.();
-    } catch { /* ignore if no world manager */ }
-    setSaving(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+      await saveCurrentWorld(playerPosition, playerRotation);
+      const worldId = useGameStore.getState().worldId;
+
+      if (worldId) {
+        for (const [chunkKey, blockChanges] of worldModifications) {
+          if (blockChanges.size === 0) continue;
+          const modifiedBlocks: { [index: string]: number } = {};
+          for (const [blockIndex, blockType] of blockChanges) {
+            modifiedBlocks[blockIndex.toString()] = blockType;
+          }
+          await worldStorage.saveChunkModifications(worldId, chunkKey, modifiedBlocks);
+        }
+      }
+
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (error) {
+      console.error('Failed to save world:', error);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const exitToMenu = () => {
     try { usePlayerStore.getState().reset(); } catch {}
     try { useInventoryStore.getState().reset(); } catch {}
     try { useWorldStore.getState().reset(); } catch {}
+    try { resetChunkManager(); } catch {}
     try { useGameStore.getState().openContainer(null); } catch {}
     setGameState('menu');
   };

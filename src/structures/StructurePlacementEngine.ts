@@ -301,9 +301,15 @@ export interface PlacementResult {
 export class StructurePlacementEngine {
   private worldSeed: number;
   private regionCache: Map<string, { structureId: string; x: number; z: number }[]> = new Map();
-  
+
   constructor(worldSeed: number) {
     this.worldSeed = worldSeed;
+  }
+
+  // Clear all cached structure placement data
+  static clearCache(): void {
+    // This is a static method for compatibility with ChunkManager
+    // Instance caches are cleared when new ChunkManager is created
   }
   
   // Generate deterministic seed for a grid cell

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { BlockType, BLOCKS } from './blocks';
 import { simpleTextureSystem } from './simpleTextures';
+import { getPublicBlockTexturePath } from './publicTextureManifest';
 
 type FaceType = 'top' | 'bottom' | 'north' | 'south' | 'east' | 'west' | 'side';
 
@@ -8,6 +9,8 @@ type FaceType = 'top' | 'bottom' | 'north' | 'south' | 'east' | 'west' | 'side';
 export class TextureManager {
   private textureCache = new Map<string, THREE.Texture>();
   private preloadedTextures = new Set<string>();
+  private publicTextureCache = new Map<string, THREE.Texture>();
+  private textureLoader = typeof window !== 'undefined' ? new THREE.TextureLoader() : null;
 
   private scheduleIdleWork(task: () => void): void {
     if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
@@ -28,8 +31,9 @@ export class TextureManager {
       return this.textureCache.get(cacheKey)!;
     }
 
-    // Generate texture using the simple texture system
-    const texture = simpleTextureSystem.getBlockTexture(blockType, normalizedFace);
+    const texture =
+      this.getPublicTexture(blockType, normalizedFace) ??
+      simpleTextureSystem.getBlockTexture(blockType, normalizedFace);
     
     // Optimize texture settings for better performance
     texture.minFilter = THREE.NearestFilter;
@@ -38,6 +42,39 @@ export class TextureManager {
     texture.needsUpdate = true;
     
     this.textureCache.set(cacheKey, texture);
+    return texture;
+  }
+
+  private getPublicTexture(blockType: BlockType, face: 'top' | 'side' | 'bottom'): THREE.Texture | null {
+    const block = BLOCKS[blockType];
+    if (!block || !this.textureLoader) {
+      return null;
+    }
+
+    const textureKey =
+      face === 'top'
+        ? block.textureTop
+        : face === 'bottom'
+          ? block.textureBottom
+          : block.textureSide;
+
+    const publicPath = getPublicBlockTexturePath(textureKey);
+    if (!publicPath) {
+      return null;
+    }
+
+    const cached = this.publicTextureCache.get(publicPath);
+    if (cached) {
+      return cached;
+    }
+
+    const texture = this.textureLoader.load(publicPath);
+    texture.minFilter = THREE.NearestFilter;
+    texture.magFilter = THREE.NearestFilter;
+    texture.generateMipmaps = false;
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.needsUpdate = true;
+    this.publicTextureCache.set(publicPath, texture);
     return texture;
   }
 
@@ -66,6 +103,7 @@ export class TextureManager {
   // Clear all cached textures
   clearCache(): void {
     this.textureCache.clear();
+    this.publicTextureCache.clear();
     simpleTextureSystem.clearCache();
   }
 

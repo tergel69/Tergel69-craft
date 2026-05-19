@@ -2,16 +2,16 @@ import { create } from 'zustand';
 import { BlockType } from '@/data/blocks';
 import { ItemType } from '@/data/items';
 import { BiomeType } from '@/data/biomes';
-import { CHUNK_SIZE, CHUNK_HEIGHT } from '@/utils/constants';
-import { chunkKey, getBlockIndex, worldToChunk, worldToLocal } from '@/utils/coordinates';
+import { CHUNK_SIZE, CHUNK_HEIGHT, MIN_WORLD_Y } from '@/utils/constants';
+import { chunkKey, getBlockIndex, isWorldYInBounds, localYToWorldY, worldToChunk, worldToLocal, worldYToLocalY } from '@/utils/coordinates';
 
 export interface ChunkData {
   x: number;
   z: number;
-  blocks: Uint8Array; // Flat array of block IDs
+  blocks: Uint16Array; // Flat array of block IDs (Uint16 to support IDs up to 65535)
   blockStates: Uint8Array; // Extra per-block state data (stairs/slabs/etc.)
   biomes: Uint8Array; // Biome data per column
-  heightMap: Uint16Array; // Highest solid block per column
+  heightMap: Int16Array; // Highest solid world Y per column
   lightMap: Uint8Array; // Light levels
   isDirty: boolean; // Needs mesh rebuild
   isGenerated: boolean;
@@ -76,14 +76,19 @@ interface WorldStore {
   loadAllChunkModifications: (modifications: Map<string, { [index: string]: number }>) => void;
 }
 
+const PACKED_BLOCK_ID_MASK = 0xffff;
+const PACKED_BLOCK_STATE_MASK = 0xff;
+const PACKED_BLOCK_STATE_SHIFT = 16;
+const PACKED_FORMAT_V2_FLAG = 1 << 24;
+
 function createEmptyChunk(x: number, z: number): ChunkData {
   return {
     x,
     z,
-    blocks: new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE),
+    blocks: new Uint16Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE),
     blockStates: new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE),
     biomes: new Uint8Array(CHUNK_SIZE * CHUNK_SIZE),
-    heightMap: new Uint16Array(CHUNK_SIZE * CHUNK_SIZE),
+    heightMap: new Int16Array(CHUNK_SIZE * CHUNK_SIZE).fill(MIN_WORLD_Y),
     lightMap: new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE).fill(15),
     isDirty: true,
     isGenerated: false,
@@ -161,7 +166,7 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
   },
 
   getBlock: (x, y, z) => {
-    if (y < 0 || y >= CHUNK_HEIGHT) return BlockType.AIR;
+    if (!isWorldYInBounds(y)) return BlockType.AIR;
 
     const chunkCoord = worldToChunk(x, z);
     const chunk = get().chunks.get(chunkKey(chunkCoord.x, chunkCoord.z));
@@ -175,7 +180,7 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
   },
 
   setBlock: (x, y, z, block, stateBits = 0) => {
-    if (y < 0 || y >= CHUNK_HEIGHT) return;
+    if (!isWorldYInBounds(y)) return;
 
     const store = get();
     const chunkCoord = worldToChunk(x, z);
@@ -222,9 +227,9 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
         chunk.heightMap[columnIndex] = y;
       }
     } else if (y === chunk.heightMap[columnIndex]) {
-      let newHeight = 0;
-      for (let checkY = y - 1; checkY >= 0; checkY--) {
-        const checkIndex = getBlockIndex(local.x, checkY, local.z);
+      let newHeight = MIN_WORLD_Y;
+      for (let checkY = y - 1; checkY >= MIN_WORLD_Y; checkY--) {
+        const checkIndex = getBlockIndex(local.x, worldYToLocalY(checkY), local.z);
         if (chunk.blocks[checkIndex] !== BlockType.AIR) {
           newHeight = checkY;
           break;
@@ -238,7 +243,12 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
       chunkModifications = new Map();
       store.modifications.set(key, chunkModifications);
     }
-    chunkModifications.set(index, block | ((stateBits & 0xff) << 8));
+    chunkModifications.set(
+      index,
+      (block & PACKED_BLOCK_ID_MASK) |
+      ((stateBits & PACKED_BLOCK_STATE_MASK) << PACKED_BLOCK_STATE_SHIFT) |
+      PACKED_FORMAT_V2_FLAG
+    );
 
     store.dirtyChunks.add(key);
     if (local.x === 0) {
@@ -330,27 +340,32 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
 
     for (const [indexStr, blockType] of Object.entries(blockChanges)) {
       const blockIndex = parseInt(indexStr);
-      const type = blockType as number;
-
-      const blockId = type & 0xff;
-      const blockState = (type >>> 8) & 0xff;
+      const packed = blockType as number;
+      const isV2 = (packed & PACKED_FORMAT_V2_FLAG) !== 0;
+      const blockId = isV2
+        ? (packed & PACKED_BLOCK_ID_MASK)
+        : (packed & PACKED_BLOCK_STATE_MASK);
+      const blockState = isV2
+        ? ((packed >>> PACKED_BLOCK_STATE_SHIFT) & PACKED_BLOCK_STATE_MASK)
+        : ((packed >>> 8) & PACKED_BLOCK_STATE_MASK);
       chunk.blocks[blockIndex] = blockId as BlockType;
       chunk.blockStates[blockIndex] = blockState;
-      modificationsMap.set(blockIndex, type);
+      modificationsMap.set(blockIndex, packed);
 
-      const x = (blockIndex % (CHUNK_SIZE * CHUNK_HEIGHT)) % CHUNK_SIZE;
-      const y = Math.floor((blockIndex % (CHUNK_SIZE * CHUNK_HEIGHT)) / CHUNK_SIZE);
-      const z = Math.floor(blockIndex / (CHUNK_SIZE * CHUNK_HEIGHT));
+      const x = blockIndex % CHUNK_SIZE;
+      const columnOffset = Math.floor(blockIndex / CHUNK_SIZE);
+      const z = columnOffset % CHUNK_SIZE;
+      const y = localYToWorldY(Math.floor(columnOffset / CHUNK_SIZE));
       const columnIndex = z * CHUNK_SIZE + x;
 
-      if (type !== BlockType.AIR) {
+      if (blockId !== BlockType.AIR) {
         if (y > chunk.heightMap[columnIndex]) {
           chunk.heightMap[columnIndex] = y;
         }
       } else if (y === chunk.heightMap[columnIndex]) {
-        let newHeight = 0;
-        for (let checkY = y - 1; checkY >= 0; checkY--) {
-          const checkIndex = getBlockIndex(x, checkY, z);
+        let newHeight = MIN_WORLD_Y;
+        for (let checkY = y - 1; checkY >= MIN_WORLD_Y; checkY--) {
+          const checkIndex = getBlockIndex(x, worldYToLocalY(checkY), z);
           if (chunk.blocks[checkIndex] !== BlockType.AIR) {
             newHeight = checkY;
             break;

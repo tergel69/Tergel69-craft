@@ -3,6 +3,7 @@ import { BlockType, BLOCKS, BlockData } from '@/data/blocks';
 import { BiomeType as VisualBiomeType, getBiomeData } from '@/data/biomes';
 import { CHUNK_SIZE, CHUNK_HEIGHT } from '@/utils/constants';
 import { ChunkData, getBlockFromChunk, getBlockStateFromChunk } from '@/stores/worldStore';
+import { heightMapWorldYToLocalY } from '@/utils/coordinates';
 import { decodeTerrainBiome } from '@/utils/biomeEncoding';
 import { textureManager } from '@/data/textureManager';
 import { AdvancedBlockShader, WaterShader, LeavesShader, GlassShader, LavaShader, OreShader } from './AdvancedShaders';
@@ -286,15 +287,19 @@ function addFaceToGroup(
   vertices: number[][],
   normal: number[],
   faceUvs: number[][],
-  tint: THREE.Color,
+  tint: { r: number; g: number; b: number },
   shade: number
 ): void {
+  const r = tint.r * shade;
+  const g = tint.g * shade;
+  const b = tint.b * shade;
+
   for (let i = 0; i < 4; i++) {
     const [vx, vy, vz] = vertices[i];
     group.positions.push(vx, vy, vz);
     group.normals.push(normal[0], normal[1], normal[2]);
     group.uvs.push(faceUvs[i][0], faceUvs[i][1]);
-    group.colors.push(tint.r * shade, tint.g * shade, tint.b * shade);
+    group.colors.push(r, g, b);
   }
 
   group.indices.push(
@@ -345,20 +350,23 @@ function getStairBoundsFromState(state: number): BoxBounds[] {
   return [lowerHalf, upperStep];
 }
 
+// Reusable color object to avoid allocations
+const reusableTint = new THREE.Color();
+
 function applyBiomeTint(
   block: BlockType,
   blockData: BlockData,
   biomeColors: { grass: THREE.Color; foliage: THREE.Color },
   face: Face
-): THREE.Color {
-  const tint = new THREE.Color(1, 1, 1);
+): { r: number; g: number; b: number } {
+  reusableTint.set(1, 1, 1);
 
   if (block === BlockType.GRASS || block === BlockType.FARMLAND) {
-    tint.copy(biomeColors.grass);
+    reusableTint.copy(biomeColors.grass);
     if (face === 'TOP') {
-      tint.lerp(new THREE.Color(1, 1, 1), 0.15);
+      reusableTint.lerpColors(reusableTint, new THREE.Color(1, 1, 1), 0.15);
     }
-    return tint;
+    return { r: reusableTint.r, g: reusableTint.g, b: reusableTint.b };
   }
 
   if (
@@ -374,11 +382,11 @@ function applyBiomeTint(
     block === BlockType.SUGAR_CANE ||
     block === BlockType.TALL_GRASS
   ) {
-    tint.copy(biomeColors.foliage);
-    return tint;
+    reusableTint.copy(biomeColors.foliage);
+    return { r: reusableTint.r, g: reusableTint.g, b: reusableTint.b };
   }
 
-  return tint;
+  return { r: 1, g: 1, b: 1 };
 }
 
 function isOccludingBlock(block: BlockType): boolean {
@@ -601,7 +609,7 @@ function addBoxModel(
   faces: typeof CUBE_FACES = CUBE_FACES
 ): void {
   const renderMode = getBlockRenderMode(block, blockData);
-  const tint = applyBiomeTint(block, blockData, biomeColors, 'TOP');
+  const baseTint = applyBiomeTint(block, blockData, biomeColors, 'TOP');
 
   for (const { face, dx, dy, dz } of faces) {
     const neighborBlock = getNeighborBlock(chunk, neighbors, x + dx, y + dy, z + dz);
@@ -621,7 +629,12 @@ function addBoxModel(
       maxY: y + bounds.maxY,
       maxZ: z + bounds.maxZ,
     });
-    const faceTint = face === 'TOP' ? tint.clone().lerp(new THREE.Color(1, 1, 1), 0.1) : tint;
+
+    // Calculate face-specific tint
+    const faceTint = face === 'TOP'
+      ? { r: baseTint.r * 0.9 + 0.1, g: baseTint.g * 0.9 + 0.1, b: baseTint.b * 0.9 + 0.1 }
+      : baseTint;
+
     addFaceToGroup(group, vertices, FACE_NORMALS[face], faceUvs, faceTint, faceShade);
   }
 }
@@ -639,7 +652,7 @@ export function buildMultiTextureChunkMesh(
       const columnIndex = z * CHUNK_SIZE + x;
       const columnHeight = Math.min(
         CHUNK_HEIGHT,
-        (chunk.heightMap[columnIndex] || 0) + 2
+        heightMapWorldYToLocalY(chunk.heightMap[columnIndex] || 0) + 2
       );
       const biomeColors = getBiomeColors(chunk, x, z);
 
@@ -811,7 +824,7 @@ export function buildWaterMesh(
   for (let z = 0; z < CHUNK_SIZE; z++) {
     for (let x = 0; x < CHUNK_SIZE; x++) {
       const columnIndex = z * CHUNK_SIZE + x;
-      const columnHeight = Math.min(CHUNK_HEIGHT, (chunk.heightMap[columnIndex] || 0) + 2);
+      const columnHeight = Math.min(CHUNK_HEIGHT, heightMapWorldYToLocalY(chunk.heightMap[columnIndex] || 0) + 2);
       for (let y = 0; y < columnHeight; y++) {
         const block = getBlockFromChunk(chunk, x, y, z);
         if (block !== BlockType.WATER && block !== BlockType.LAVA) continue;

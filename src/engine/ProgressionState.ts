@@ -13,7 +13,7 @@ export interface BossKillRecord {
 
 export type BossType = 'ender_dragon' | 'wither';
 
-export type DimensionId = 'overworld' | 'nether' | 'end';
+export type DimensionId = 'overworld' | 'nether' | 'end' | 'aether' | 'underdeep';
 
 export interface StructureDiscovery {
   structureType: StructureType;
@@ -27,6 +27,9 @@ export type StructureType =
   | 'nether_fortress'
   | 'bastion_remnant'
   | 'ancient_city'
+  | 'mountain_citadel'
+  | 'sky_sanctuary'
+  | 'underdeep_gate'
   | 'dungeon'
   | 'desert_temple'
   | 'jungle_temple'
@@ -87,6 +90,7 @@ export interface ProgressionStateData {
   // Portal linkage (for Nether/End travel)
   netherPortalLink: Map<string, string>; // overworldKey -> netherKey
   endPortalActivated: boolean;
+  unlockedDimensionKeys: Partial<Record<Exclude<DimensionId, 'overworld'>, boolean>>;
   
   // World events
   raidsTriggered: number;
@@ -114,7 +118,7 @@ export const DEFAULT_GAME_RULES: GameRules = {
   spawnRadius: 10,
 };
 
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 
 export function createInitialProgressionState(): ProgressionStateData {
   return {
@@ -126,6 +130,7 @@ export function createInitialProgressionState(): ProgressionStateData {
     gameRules: { ...DEFAULT_GAME_RULES },
     netherPortalLink: new Map(),
     endPortalActivated: false,
+    unlockedDimensionKeys: {},
     raidsTriggered: 0,
     elderGuardiansDefeated: 0,
     createdAt: Date.now(),
@@ -274,6 +279,24 @@ export function activateEndPortal(state: ProgressionStateData): ProgressionState
   };
 }
 
+export function unlockDimensionProgression(
+  state: ProgressionStateData,
+  dimension: Exclude<DimensionId, 'overworld'>
+): ProgressionStateData {
+  if (state.unlockedDimensionKeys[dimension]) {
+    return state;
+  }
+
+  return {
+    ...state,
+    unlockedDimensionKeys: {
+      ...state.unlockedDimensionKeys,
+      [dimension]: true,
+    },
+    lastUpdatedAt: Date.now(),
+  };
+}
+
 /**
  * Serialize progression state for storage (converts Map to object)
  */
@@ -315,6 +338,11 @@ function migrateToNextVersion(state: ProgressionStateData, fromVersion: number):
       return {
         ...state,
         gameRules: state.gameRules || { ...DEFAULT_GAME_RULES },
+      };
+    case 1:
+      return {
+        ...state,
+        unlockedDimensionKeys: state.unlockedDimensionKeys || {},
       };
     default:
       return state;

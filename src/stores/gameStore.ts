@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { DAY_LENGTH } from '@/utils/constants';
 import { worldStorage, SavedWorld } from '@/engine/WorldStorage';
 import { useWorldStore } from '@/stores/worldStore';
+import { MAX_WORLD_Y, MIN_WORLD_Y } from '@/utils/constants';
+import { ACTIVE_WORLDGEN_PRESET_VERSION } from '@/worldgen/preset';
 import {
   PerformanceProfile,
   DEFAULT_PERFORMANCE_PROFILE,
@@ -24,6 +26,7 @@ export type GameState =
 export type CameraMode = 'firstPerson' | 'thirdPerson';
 export type WorldInitMode = 'new' | 'loaded';
 export type WorldGenerationMode = 'classic' | 'new_generation';
+export type DimensionId = 'overworld' | 'nether' | 'end' | 'aether' | 'underdeep';
 
 const DEFAULT_MOUSE_SENSITIVITY = 0.002;
 
@@ -138,7 +141,7 @@ const initialState = {
   worldId: null as string | null,
   worldName: 'New World',
   worldSeed: Date.now(),
-  worldGenerationMode: 'classic' as WorldGenerationMode,
+  worldGenerationMode: 'new_generation' as WorldGenerationMode,
   worldInitMode: 'new' as WorldInitMode,
   activeContainer: null as { x: number; y: number; z: number; type: 'chest' | 'furnace' | 'enchanting' } | null,
   savedWorlds: [] as SavedWorld[],
@@ -234,6 +237,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   saveCurrentWorld: async (playerPos, playerRot) => {
     const state = get();
     let worldId = state.worldId;
+    const existingWorld = worldId ? await worldStorage.loadWorld(worldId) : null;
 
     // Create new world ID if this is a new world
     if (!worldId) {
@@ -246,7 +250,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
       name: state.worldName,
       seed: state.worldSeed,
       generationMode: state.worldGenerationMode,
-      createdAt: Date.now(),
+      worldgenPresetVersion: state.worldGenerationMode === 'new_generation' ? ACTIVE_WORLDGEN_PRESET_VERSION : 'legacy_v1',
+      minWorldY: MIN_WORLD_Y,
+      maxWorldY: MAX_WORLD_Y,
+      createdAt: existingWorld?.createdAt ?? Date.now(),
       lastPlayed: Date.now(),
       playerPosition: playerPos,
       playerRotation: playerRot,
@@ -269,6 +276,20 @@ export const useGameStore = create<GameStore>((set, get) => ({
     try {
       const world = await worldStorage.loadWorld(worldId);
       if (world) {
+        const isIncompatibleMythicWorld =
+          world.generationMode === 'new_generation' &&
+          (
+            world.worldgenPresetVersion !== ACTIVE_WORLDGEN_PRESET_VERSION ||
+            world.minWorldY !== MIN_WORLD_Y ||
+            world.maxWorldY !== MAX_WORLD_Y
+          );
+
+        if (isIncompatibleMythicWorld) {
+          throw new Error(
+            `World ${world.name} uses incompatible mythic world data (${world.worldgenPresetVersion ?? 'unknown'}, y=${world.minWorldY ?? 'unknown'}..${world.maxWorldY ?? 'unknown'})`
+          );
+        }
+
         set({
           worldId: world.id,
           worldName: world.name,

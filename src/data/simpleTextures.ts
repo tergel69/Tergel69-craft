@@ -81,6 +81,9 @@ export class SimpleTextureSystem {
       case BlockType.SAND:
         this.drawSand(ctx);
         break;
+      case BlockType.RED_SAND:
+        this.drawRedSand(ctx);
+        break;
       case BlockType.GRAVEL:
         this.drawGravel(ctx);
         break;
@@ -943,6 +946,35 @@ export class SimpleTextureSystem {
     ctx.fillRect(2, 1, 1, 1);
     ctx.fillRect(5, 4, 1, 1);
     ctx.fillRect(1, 6, 1, 1);
+  }
+
+  private drawRedSand(ctx: CanvasRenderingContext2D): void {
+    ctx.fillStyle = '#C88958';
+    ctx.fillRect(0, 0, 8, 8);
+
+    const pattern = [
+      [1,0,0,1,0,1,0,0],
+      [0,1,0,0,1,0,0,1],
+      [0,0,1,0,0,1,0,0],
+      [1,0,0,1,0,0,1,0],
+      [0,1,0,0,1,0,0,1],
+      [0,0,1,0,0,1,0,0],
+      [1,0,0,1,0,0,1,0],
+      [0,1,0,0,1,0,0,1]
+    ];
+
+    ctx.fillStyle = '#A86940';
+    for (let y = 0; y < 8; y++) {
+      for (let x = 0; x < 8; x++) {
+        if (pattern[y][x]) ctx.fillRect(x, y, 1, 1);
+      }
+    }
+
+    ctx.fillStyle = '#E5A875';
+    ctx.fillRect(1, 1, 1, 1);
+    ctx.fillRect(4, 3, 1, 1);
+    ctx.fillRect(6, 5, 1, 1);
+    ctx.fillRect(2, 7, 1, 1);
   }
 
   private drawGravel(ctx: CanvasRenderingContext2D): void {

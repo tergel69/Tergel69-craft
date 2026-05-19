@@ -1,3 +1,6 @@
+import { MAX_WORLD_Y, MIN_WORLD_Y } from '@/utils/constants';
+import { ACTIVE_WORLDGEN_PRESET_VERSION, WorldgenPresetVersion } from '@/worldgen/preset';
+
 // World save/load functionality using IndexedDB
 
 const DB_NAME = 'MinecraftCloneDB';
@@ -10,6 +13,9 @@ export interface SavedWorld {
   name: string;
   seed: number;
   generationMode?: 'classic' | 'new_generation';
+  worldgenPresetVersion?: WorldgenPresetVersion;
+  minWorldY?: number;
+  maxWorldY?: number;
   createdAt: number;
   lastPlayed: number;
   playerPosition: { x: number; y: number; z: number };

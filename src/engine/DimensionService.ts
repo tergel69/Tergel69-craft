@@ -8,6 +8,7 @@
 
 import { DimensionId } from './ProgressionState';
 import { Vector3 } from '@/utils/coordinates';
+import { DEFAULT_DIMENSION_GENERATOR_CONFIGS } from '@/worldgen/preset';
 
 export interface DimensionConfig {
   id: DimensionId;
@@ -22,6 +23,7 @@ export interface DimensionConfig {
   respawnAnchorWorks: boolean;
   ceilingHeight?: number; // For Nether (bedrock ceiling)
   floorHeight?: number;   // For Nether (bedrock floor)
+  generator: typeof DEFAULT_DIMENSION_GENERATOR_CONFIGS[DimensionId];
 }
 
 export interface PortalLink {
@@ -50,6 +52,7 @@ export const OVERWORLD_CONFIG: DimensionConfig = {
   hasDaylightCycle: true,
   bedWorks: true,
   respawnAnchorWorks: false,
+  generator: DEFAULT_DIMENSION_GENERATOR_CONFIGS.overworld,
 };
 
 export const NETHER_CONFIG: DimensionConfig = {
@@ -65,6 +68,7 @@ export const NETHER_CONFIG: DimensionConfig = {
   respawnAnchorWorks: true,
   ceilingHeight: 127,
   floorHeight: 0,
+  generator: DEFAULT_DIMENSION_GENERATOR_CONFIGS.nether,
 };
 
 export const END_CONFIG: DimensionConfig = {
@@ -78,12 +82,42 @@ export const END_CONFIG: DimensionConfig = {
   hasDaylightCycle: false,
   bedWorks: false, // Beds explode in End
   respawnAnchorWorks: false,
+  generator: DEFAULT_DIMENSION_GENERATOR_CONFIGS.end,
+};
+
+export const AETHER_CONFIG: DimensionConfig = {
+  id: 'aether',
+  name: 'The Aether',
+  spawnPosition: { x: 0, y: 320, z: 0 },
+  skyColor: '#dff4ff',
+  fogColor: '#f7fbff',
+  cloudHeight: 360,
+  hasWeather: false,
+  hasDaylightCycle: true,
+  bedWorks: true,
+  respawnAnchorWorks: false,
+  generator: DEFAULT_DIMENSION_GENERATOR_CONFIGS.aether,
+};
+
+export const UNDERDEEP_CONFIG: DimensionConfig = {
+  id: 'underdeep',
+  name: 'The Underdeep',
+  spawnPosition: { x: 0, y: -192, z: 0 },
+  skyColor: '#09060d',
+  fogColor: '#120d18',
+  hasWeather: false,
+  hasDaylightCycle: false,
+  bedWorks: false,
+  respawnAnchorWorks: true,
+  generator: DEFAULT_DIMENSION_GENERATOR_CONFIGS.underdeep,
 };
 
 export const DIMENSION_CONFIGS: Record<DimensionId, DimensionConfig> = {
   overworld: OVERWORLD_CONFIG,
   nether: NETHER_CONFIG,
   end: END_CONFIG,
+  aether: AETHER_CONFIG,
+  underdeep: UNDERDEEP_CONFIG,
 };
 
 /**
@@ -93,6 +127,8 @@ export const DIMENSION_SCALE: Record<DimensionId, number> = {
   overworld: 1,
   nether: 8, // 1 block in Nether = 8 blocks in Overworld
   end: 1,
+  aether: 1,
+  underdeep: 1,
 };
 
 /**
@@ -111,12 +147,14 @@ export function calculatePortalLink(
   } else if (fromDimension === 'nether') {
     targetDimension = 'overworld';
     scale = DIMENSION_SCALE.overworld / DIMENSION_SCALE.nether;
-  } else {
-    // End doesn't have coordinate scaling
+  } else if (fromDimension === 'aether' || fromDimension === 'underdeep' || fromDimension === 'end') {
     return {
       targetDimension: 'overworld',
       targetPosition: { ...fromPosition },
     };
+  } else {
+    targetDimension = 'overworld';
+    scale = 1;
   }
   
   return {
@@ -167,6 +205,8 @@ export function createInitialDimensionState(): DimensionState {
       ['overworld', { ...OVERWORLD_CONFIG.spawnPosition }],
       ['nether', { ...NETHER_CONFIG.spawnPosition }],
       ['end', { ...END_CONFIG.spawnPosition }],
+      ['aether', { ...AETHER_CONFIG.spawnPosition }],
+      ['underdeep', { ...UNDERDEEP_CONFIG.spawnPosition }],
     ]),
   };
 }

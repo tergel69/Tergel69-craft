@@ -2,6 +2,7 @@ import { useWorldStore } from '@/stores/worldStore';
 import { BlockType, BLOCKS } from '@/data/blocks';
 import { CHUNK_SIZE, CHUNK_HEIGHT } from '@/utils/constants';
 import { worldToChunk, worldToLocal, chunkKey } from '@/utils/coordinates';
+import { heightMapWorldYToLocalY, isWorldYInBounds } from '@/utils/coordinates';
 
 // Light propagation constants
 const MAX_LIGHT_LEVEL = 15;
@@ -40,7 +41,7 @@ export class LightingOptimizer {
     for (let z = 0; z < CHUNK_SIZE; z++) {
       for (let x = 0; x < CHUNK_SIZE; x++) {
         const columnIndex = z * CHUNK_SIZE + x;
-        const surfaceY = chunk.heightMap[columnIndex];
+        const surfaceY = heightMapWorldYToLocalY(chunk.heightMap[columnIndex]);
         
         // Light from sky
         for (let y = surfaceY; y < CHUNK_HEIGHT; y++) {
@@ -210,7 +211,7 @@ export class LightingOptimizer {
   }
 
   isValidPosition(x: number, y: number, z: number): boolean {
-    return y >= 0 && y < CHUNK_HEIGHT;
+    return isWorldYInBounds(y);
   }
 
   private getLightIndex(x: number, y: number, z: number): number {

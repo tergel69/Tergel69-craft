@@ -1,4 +1,4 @@
-import { useWorldStore, ChunkData } from '@/stores/worldStore';
+import { useWorldStore, ChunkData, getBlockFromChunk } from '@/stores/worldStore';
 import { TerrainGenerator } from './TerrainGenerator';
 import { CHUNK_SIZE, CHUNK_HEIGHT, RENDER_DISTANCE } from '@/utils/constants';
 import { chunkKey, worldToChunk, getChunksInRadius } from '@/utils/coordinates';
@@ -6,6 +6,9 @@ import { useGameStore, WorldGenerationMode } from '@/stores/gameStore';
 import { BlockType } from '@/data/blocks';
 import { encodeTerrainBiome } from '@/utils/biomeEncoding';
 import { StructureGenerator } from '@/structures/StructureGenerator';
+import { structureRegistry } from '@/structures/StructureRegistry';
+import { StructurePlacementEngine } from '@/structures/StructurePlacementEngine';
+import { initializeStructurePacks } from '@/structures/ModdedStructurePacks';
 import { getNewGenerationTerrainGenerator } from './NewGenerationTerrainGenerator';
 import { textureManager } from '@/data/textureManager';
 import { clearMaterialCache as clearChunkMaterialCache } from '@/components/Chunk';
@@ -23,6 +26,10 @@ export class ChunkManager {
   private lastRenderDistance: number | null = null;
   private generationMode: WorldGenerationMode;
   private seed: number; // Store seed
+
+  // Web Workers for offloading heavy computation
+  private generationWorker: Worker | null = null;
+  private pendingGenerationPromises: Map<string, { resolve: (chunk: ChunkData) => void; reject: (error: any) => void }> = new Map();
   
   // Look-based chunk loading
   private lastLookDirection: { yaw: number; pitch: number } | null = null;
@@ -31,11 +38,81 @@ export class ChunkManager {
   private readonly LOOK_PRIORITY_BOOST = 0.4; // 40% priority reduction for in-view chunks
   private readonly LOOK_ANGLE_THRESHOLD = Math.PI / 4; // 45 degrees
 
-  constructor(seed: number, generationMode: WorldGenerationMode = 'classic') {
+  constructor(seed: number, generationMode: WorldGenerationMode = 'new_generation') {
     this.seed = seed; // Store seed
     this.generationMode = generationMode;
     this.terrainGenerator = new TerrainGenerator(seed);
     this.newGenerationTerrainGenerator = getNewGenerationTerrainGenerator(seed);
+
+    // Initialize generation worker
+    this.initializeGenerationWorker();
+
+    // Initialize modern structure systems
+    structureRegistry.clear();
+    StructurePlacementEngine.clearCache();
+    initializeStructurePacks();
+  }
+
+  private initializeGenerationWorker(): void {
+    try {
+      this.generationWorker = new Worker(new URL('../workers/generationWorker.ts', import.meta.url), { type: 'module' });
+
+      this.generationWorker.onmessage = (e) => {
+        const { type, chunkX, chunkZ, blocks } = e.data;
+        if (type === 'chunk_generated') {
+          const key = `${chunkX},${chunkZ}`;
+          const promise = this.pendingGenerationPromises.get(key);
+          if (promise) {
+            // Convert worker response to ChunkData
+            const chunkData: ChunkData = {
+              x: chunkX,
+              z: chunkZ,
+              blocks: blocks,
+              blockStates: new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE),
+              biomes: new Uint8Array(CHUNK_SIZE * CHUNK_SIZE),
+              heightMap: new Int16Array(CHUNK_SIZE * CHUNK_SIZE),
+              lightMap: new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE).fill(15),
+              isDirty: true,
+              isGenerated: true,
+            };
+
+            // Calculate height map
+            for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+              for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+                const columnIndex = lz * CHUNK_SIZE + lx;
+                let highestBlock = 0;
+                for (let y = CHUNK_HEIGHT - 1; y >= 0; y--) {
+                  if (getBlockFromChunk(chunkData, lx, y, lz) !== BlockType.AIR) {
+                    highestBlock = y;
+                    break;
+                  }
+                }
+                chunkData.heightMap[columnIndex] = highestBlock;
+
+                // Simplified biome (could be improved)
+                chunkData.biomes[columnIndex] = 0;
+              }
+            }
+
+            promise.resolve(chunkData);
+            this.pendingGenerationPromises.delete(key);
+          }
+        }
+      };
+
+      this.generationWorker.onerror = (error) => {
+        console.error('Generation worker error:', error);
+        // Fallback to main thread generation
+        this.fallbackToMainThreadGeneration();
+      };
+    } catch (error) {
+      console.warn('Web Workers not supported, falling back to main thread generation');
+      this.fallbackToMainThreadGeneration();
+    }
+  }
+
+  private fallbackToMainThreadGeneration(): void {
+    this.generationWorker = null;
   }
 
   // Update look direction for chunk prioritization
@@ -200,7 +277,7 @@ export class ChunkManager {
     }
   }
 
-  private processGenerationQueue(): void {
+  private async processGenerationQueue(): Promise<void> {
     if (this.isGenerating || this.generationQueue.size === 0) return;
 
     this.isGenerating = true;
@@ -208,11 +285,11 @@ export class ChunkManager {
     // Adaptive time slicing - much more aggressive to load world faster
     const currentRenderDistance = useGameStore.getState().renderDistance ?? RENDER_DISTANCE;
     const queued = this.generationQueue.size;
-    
+
     // Calculate chunks per frame - more aggressive for faster world loading
     let chunksPerFrame: number;
     let timeBudgetMs: number;
-    
+
     if (queued <= 20) {
       // Low backlog - process up to 8 chunks
       chunksPerFrame = 8;
@@ -226,11 +303,11 @@ export class ChunkManager {
       chunksPerFrame = 4;
       timeBudgetMs = 20; // 20ms - still leave some time for other work
     }
-    
+
     const start = performance.now();
     let processed = 0;
     const keysToProcess: string[] = [];
-    
+
     // Collect keys to process first (allows better error handling)
     for (const key of this.generationQueue) {
       if (processed >= chunksPerFrame) break;
@@ -238,19 +315,64 @@ export class ChunkManager {
       keysToProcess.push(key);
       processed++;
     }
-    
-    // Process collected chunks
+
+    // Process collected chunks asynchronously
+    const promises: Promise<void>[] = [];
     for (const key of keysToProcess) {
       if (performance.now() - start > timeBudgetMs) break;
       this.generationQueue.delete(key);
       const [x, z] = key.split(',').map(Number);
-      this.generateChunk(x, z);
+      promises.push(this.generateChunk(x, z));
     }
+
+    // Wait for all chunks to be generated
+    await Promise.allSettled(promises);
 
     this.isGenerating = false;
   }
 
-  private generateChunk(x: number, z: number): void {
+  private async generateChunk(x: number, z: number): Promise<void> {
+    const worldStore = useWorldStore.getState();
+
+    if (this.generationWorker) {
+      // Use worker for generation
+      try {
+        const chunkData = await this.generateChunkWithWorker(x, z);
+        worldStore.setChunk(x, z, chunkData);
+      } catch (error) {
+        console.error('Worker generation failed, falling back to main thread:', error);
+        this.fallbackGenerateChunk(x, z);
+      }
+    } else {
+      // Fallback to main thread generation
+      this.fallbackGenerateChunk(x, z);
+    }
+  }
+
+  private generateChunkWithWorker(x: number, z: number): Promise<ChunkData> {
+    return new Promise((resolve, reject) => {
+      const key = `${x},${z}`;
+      this.pendingGenerationPromises.set(key, { resolve, reject });
+
+      this.generationWorker!.postMessage({
+        type: 'generate',
+        chunkX: x,
+        chunkZ: z,
+        seed: this.seed,
+        generationMode: this.generationMode,
+      });
+
+      // Timeout fallback
+      setTimeout(() => {
+        if (this.pendingGenerationPromises.has(key)) {
+          this.pendingGenerationPromises.delete(key);
+          reject(new Error('Generation timeout'));
+        }
+      }, 5000);
+    });
+  }
+
+  private fallbackGenerateChunk(x: number, z: number): void {
     const worldStore = useWorldStore.getState();
 
     const generatedChunk = this.createGeneratedChunk(x, z);
@@ -262,7 +384,7 @@ export class ChunkManager {
       blocks: generatedChunk.blocks,
       blockStates: new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE),
       biomes: new Uint8Array(CHUNK_SIZE * CHUNK_SIZE),
-      heightMap: new Uint16Array(CHUNK_SIZE * CHUNK_SIZE),
+      heightMap: new Int16Array(CHUNK_SIZE * CHUNK_SIZE),
       lightMap: new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE).fill(15),
       isDirty: true,
       isGenerated: true,
@@ -303,6 +425,13 @@ export class ChunkManager {
       return chunk;
     }
 
+    // For initial load, use main thread generation to ensure synchronous behavior
+    return this.fallbackGenerateChunkSync(x, z);
+  }
+
+  private fallbackGenerateChunkSync(x: number, z: number): ChunkData {
+    const worldStore = useWorldStore.getState();
+
     const generatedChunk = this.createGeneratedChunk(x, z);
     const chunkData = this.convertGeneratedChunk(generatedChunk, x, z);
 
@@ -327,7 +456,7 @@ export class ChunkManager {
       blocks: generatedChunk.blocks,
       blockStates: new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE),
       biomes: new Uint8Array(CHUNK_SIZE * CHUNK_SIZE),
-      heightMap: new Uint16Array(CHUNK_SIZE * CHUNK_SIZE),
+      heightMap: new Int16Array(CHUNK_SIZE * CHUNK_SIZE),
       lightMap: new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE).fill(15),
       isDirty: true,
       isGenerated: true,
@@ -404,3 +533,5 @@ export function resetChunkManager(options: { clearWorldStore?: boolean } = {}): 
   }
   chunkManager = null;
 }
+
+

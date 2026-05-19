@@ -1,5 +1,5 @@
 import { isLiquid, isSolid } from '@/data/blocks';
-import { CHUNK_HEIGHT, SEA_LEVEL } from '@/utils/constants';
+import { MAX_WORLD_Y, MIN_WORLD_Y, SEA_LEVEL } from '@/utils/constants';
 import { worldToChunk } from '@/utils/coordinates';
 import { useWorldStore } from '@/stores/worldStore';
 
@@ -32,7 +32,7 @@ export interface SpawnSearchOptions {
 
 const DEFAULT_SEARCH_RADIUS = 64;
 const DEFAULT_MINIMUM_LOADED_SAMPLES = 2; // Reduced from 3 for better spawn success
-const DEFAULT_FALLBACK_Y = 180;
+const DEFAULT_FALLBACK_Y = SEA_LEVEL + 8;
 const COLUMN_CLEARANCE = 2;
 const MIN_SURFACE_Y = SEA_LEVEL - 5; // Allow spawn near and slightly below water level
 
@@ -61,7 +61,8 @@ function getLoadedChunkCoverage(worldX: number, worldZ: number, minimumLoadedSam
   let loaded = 0;
   for (const [sampleX, sampleZ] of samples) {
     const chunk = worldToChunk(sampleX, sampleZ);
-    if (world.isChunkLoaded(chunk.x, chunk.z)) loaded++;
+    const chunkData = world.getChunk(chunk.x, chunk.z);
+    if (chunkData?.isGenerated) loaded++;
   }
 
   // Return loaded count even if less than minimum (will be used as coverage check)
@@ -73,7 +74,7 @@ function findSurfaceY(worldX: number, worldZ: number): number | null {
   const fx = Math.floor(worldX);
   const fz = Math.floor(worldZ);
 
-  for (let y = CHUNK_HEIGHT - 3; y >= 1; y--) {
+  for (let y = MAX_WORLD_Y - 3; y >= MIN_WORLD_Y + 1; y--) {
     const ground = world.getBlock(fx, y, fz);
     if (!isSolid(ground) || isLiquid(ground)) continue;
 
@@ -89,20 +90,6 @@ function findSurfaceY(worldX: number, worldZ: number): number | null {
   return null;
 }
 
-function hasOpenSkyAbove(worldX: number, worldZ: number, surfaceY: number): boolean {
-  const world = useWorldStore.getState();
-  const fx = Math.floor(worldX);
-  const fz = Math.floor(worldZ);
-
-  for (let y = surfaceY + 1; y < CHUNK_HEIGHT; y++) {
-    const block = world.getBlock(fx, y, fz);
-    if (!isSolid(block) && !isLiquid(block)) continue;
-    return false;
-  }
-
-  return true;
-}
-
 // Check if there's solid land nearby (not just water surface)
 function hasNearbyLand(worldX: number, worldZ: number, searchRadius: number = 8): boolean {
   const world = useWorldStore.getState();
@@ -114,7 +101,7 @@ function hasNearbyLand(worldX: number, worldZ: number, searchRadius: number = 8)
       if (dx === 0 && dz === 0) continue;
       
       // Check if there's solid ground below the surface at this location
-      for (let y = 1; y < SEA_LEVEL; y++) {
+      for (let y = MIN_WORLD_Y + 1; y < SEA_LEVEL; y++) {
         const block = world.getBlock(fx + dx, y, fz + dz);
         if (isSolid(block) && !isLiquid(block)) {
           return true; // Found solid ground nearby
@@ -139,7 +126,7 @@ function isInDeepWater(worldX: number, worldZ: number): boolean {
       totalChecks++;
       // Check if the column is mostly water (no solid blocks above seabed)
       let hasSolidAboveSea = false;
-      for (let y = SEA_LEVEL - 2; y >= 1; y--) {
+      for (let y = SEA_LEVEL - 2; y >= MIN_WORLD_Y + 1; y--) {
         const block = world.getBlock(fx + dx, y, fz + dz);
         if (isSolid(block) && !isLiquid(block)) {
           hasSolidAboveSea = true;
@@ -188,10 +175,6 @@ export function resolveSpawnLocation(options: SpawnSearchOptions): SpawnResult |
   for (const candidate of candidates) {
     checkedColumns++;
 
-    const coverage = requireLoadedChunks
-      ? getLoadedChunkCoverage(candidate.x, candidate.z, minimumLoadedSamples)
-      : minimumLoadedSamples;
-
     const loadedCount = getLoadedChunkCoverage(candidate.x, candidate.z, minimumLoadedSamples);
     // Be more lenient - only require at least 1 loaded sample
     if (requireLoadedChunks && loadedCount < 1) continue;
@@ -199,9 +182,8 @@ export function resolveSpawnLocation(options: SpawnSearchOptions): SpawnResult |
 
     const surfaceY = findSurfaceY(candidate.x, candidate.z);
     if (surfaceY === null) continue;
-    if (surfaceY <= 4 || surfaceY >= CHUNK_HEIGHT - 2) continue;
+    if (surfaceY <= MIN_WORLD_Y + 4 || surfaceY >= MAX_WORLD_Y - 2) continue;
     if (surfaceY < MIN_SURFACE_Y) continue;
-    if (!hasOpenSkyAbove(candidate.x, candidate.z, surfaceY)) continue;
 
     return {
       position: {
@@ -210,7 +192,7 @@ export function resolveSpawnLocation(options: SpawnSearchOptions): SpawnResult |
         z: candidate.z + 0.5,
       },
       source: 'surface',
-      reason: 'Found a dry surface column with open sky and headroom',
+      reason: 'Found a dry surface column with headroom',
       anchor: { x: originX, z: originZ },
       checkedColumns,
       loadedColumns,

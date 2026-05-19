@@ -6,7 +6,7 @@ import { textureAtlas } from './TextureAtlas';
 export class Chunk {
   readonly cx: number;
   readonly cz: number;
-  readonly blocks: Uint8Array;
+  readonly blocks: Uint16Array;
   mesh: THREE.Mesh | null = null;
   needsUpdate = true;
   private geometry: THREE.BufferGeometry | null = null;
@@ -14,7 +14,7 @@ export class Chunk {
   constructor(cx: number, cz: number) {
     this.cx = cx;
     this.cz = cz;
-    this.blocks = new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE);
+    this.blocks = new Uint16Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE);
   }
 
   getBlock(x: number, y: number, z: number): BlockType {
