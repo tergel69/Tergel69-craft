@@ -18,6 +18,7 @@ import BlockBreakOverlay from './BlockBreakOverlay';
 import CreativeInventory from './CreativeInventory';
 import PerformanceHUD from './PerformanceHUD';
 import DroppedItems from './DroppedItems';
+import XpOrbs from './XpOrbs';
 import DeathScreen from './DeathScreen';
 import ContainerScreen, { FurnaceProcessor } from './ContainerScreen';
 import { ensureAudioUnlocked } from '@/utils/audio';
@@ -120,6 +121,7 @@ export default function Game() {
             <World />
             <DroppedItems />
             <BlockBreakOverlay />
+            <XpOrbs />
             <Entities />
             <PlayerModel />
             <Player />

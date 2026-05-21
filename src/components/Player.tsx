@@ -13,6 +13,7 @@ import { BlockType } from '@/data/blocks';
 import { getBreakTime, isUnbreakable } from '@/data/blockHardness';
 import { getEfficiencyMultiplier, getSharpnessBonus } from '@/data/enchantments';
 import { useDroppedItemStore } from './DroppedItems';
+import { useXpStore, getBlockXp, getMobXp } from '@/utils/experience';
 import { useInventoryStore } from '@/stores/inventoryStore';
 import { PLAYER_REACH } from '@/utils/constants';
 import { unifiedEntityManager as entityManager } from '@/entities/UnifiedEntityManager';
@@ -353,6 +354,11 @@ export default function Player() {
             useWorldStore.getState().setBlock(bx, by, bz, BlockType.AIR);
             for (const drop of drops) {
               useDroppedItemStore.getState().spawnDrop(drop.item, bx, by, bz, drop.count);
+            }
+            // Spawn XP orbs for ore blocks
+            const blockXp = getBlockXp(targetBlock);
+            if (blockXp > 0) {
+              useXpStore.getState().spawnOrbs(blockXp, bx + 0.5, by + 0.5, bz + 0.5);
             }
             playBreakSound(targetBlock);
             inventoryStore.useDurability(selectedSlot, 1);
