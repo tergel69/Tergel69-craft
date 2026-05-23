@@ -27,6 +27,11 @@ export type CameraMode = 'firstPerson' | 'thirdPerson';
 export type WorldInitMode = 'new' | 'loaded';
 export type WorldGenerationMode = 'classic' | 'new_generation';
 export type DimensionId = 'overworld' | 'nether' | 'end' | 'aether' | 'underdeep';
+export const DIMENSION_SCALE: Record<string, number> = {
+  overworld: 1,
+  nether: 8,
+  end: 1,
+};
 
 const DEFAULT_MOUSE_SENSITIVITY = 0.002;
 
@@ -84,6 +89,7 @@ interface GameStore {
   worldGenerationMode: WorldGenerationMode;
   worldInitMode: WorldInitMode;
   activeContainer: { x: number; y: number; z: number; type: 'chest' | 'furnace' | 'enchanting' } | null;
+  currentDimension: DimensionId;
   savedWorlds: SavedWorld[];
 
   // Actions
@@ -116,6 +122,7 @@ interface GameStore {
   loadWorld: (worldId: string) => Promise<SavedWorld | null>;
   deleteWorld: (worldId: string) => Promise<void>;
   setPerformanceProfile: (profile: PerformanceProfile | PerformancePreset) => void;
+  setDimension: (dimension: DimensionId) => void;
 }
 
 const initialState = {
@@ -144,6 +151,7 @@ const initialState = {
   worldGenerationMode: 'new_generation' as WorldGenerationMode,
   worldInitMode: 'new' as WorldInitMode,
   activeContainer: null as { x: number; y: number; z: number; type: 'chest' | 'furnace' | 'enchanting' } | null,
+  currentDimension: 'overworld' as DimensionId,
   savedWorlds: [] as SavedWorld[],
   performanceProfile: DEFAULT_PERFORMANCE_PROFILE,
 };
@@ -321,6 +329,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       console.error('Failed to delete world:', e);
     }
   },
+
+  setDimension: (dimension) => set({ currentDimension: dimension }),
 
   setPerformanceProfile: (profile) => {
     const newProfile = typeof profile === 'string'

@@ -8,7 +8,7 @@ import { usePlayerStore, getSelectedBlockType } from '@/stores/playerStore';
 import { useWorldStore } from '@/stores/worldStore';
 import { useMouse } from '@/hooks/useMouse';
 import { useKeyboard, useNumberKeys } from '@/hooks/useKeyboard';
-import { applyPhysics, canJump, getJumpVelocity } from '@/engine/Physics';
+import { applyPhysics, canJump, getJumpVelocity, findSafeSpawnPosition } from '@/engine/Physics';
 import { BlockType } from '@/data/blocks';
 import { getBreakTime, isUnbreakable } from '@/data/blockHardness';
 import { getEfficiencyMultiplier, getSharpnessBonus } from '@/data/enchantments';
@@ -30,12 +30,13 @@ import {
   playLandSound,
   playPlaceSound,
 } from '@/utils/audio';
-import { normalizeMouseSensitivity } from '@/stores/gameStore';
+import { normalizeMouseSensitivity, DIMENSION_SCALE, DimensionId } from '@/stores/gameStore';
 
 const SPRINT_MULTIPLIER      = 1.6;
 const SWIM_SPRINT_MULTIPLIER = 1.4;
 const DOUBLE_TAP_WINDOW      = 300;
 const PLACE_COOLDOWN         = 0.2;
+const PORTAL_ACTIVATE_DELAY  = 1.0; // seconds in portal before teleport
 
 function getStairFacingFromYaw(yaw: number): number {
   const normalized = ((yaw % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
@@ -127,6 +128,7 @@ export default function Player() {
   const oxygenTickRef = useRef(0);
   const lastStepTimeRef = useRef(0);
   const lastDamageSoundRef = useRef(0);
+  const portalTimerRef = useRef(0);
 
   // ── Hand animation refs ───────────────────────────────────────────────────
   const handRef       = useRef<THREE.Group>(null!);
@@ -564,6 +566,33 @@ export default function Player() {
         fallDistanceRef.current = 0;
       }
       if (result.onGround) fallDistanceRef.current = 0;
+
+      // ── Portal teleportation ─────────────────────────────────────────
+      const feetBlock = useWorldStore.getState().getBlock(
+        Math.floor(result.x), Math.floor(result.y + 0.1), Math.floor(result.z)
+      );
+      const isInPortal = feetBlock === BlockType.NETHER_PORTAL;
+      portalTimerRef.current = isInPortal
+        ? Math.min(PORTAL_ACTIVATE_DELAY, portalTimerRef.current + dt)
+        : Math.max(0, portalTimerRef.current - dt * 2);
+
+      if (isInPortal && portalTimerRef.current >= PORTAL_ACTIVATE_DELAY) {
+        portalTimerRef.current = 0;
+        const currentDim = useGameStore.getState().currentDimension;
+        const targetDim: DimensionId = currentDim === 'nether' ? 'overworld' : 'nether';
+        const scale = DIMENSION_SCALE[currentDim] ?? 1;
+        const targetScale = DIMENSION_SCALE[targetDim] ?? 1;
+        const ratio = scale / targetScale;
+        const mx = result.x * ratio + 0.5;
+        const mz = result.z * ratio + 0.5;
+        // Find safe spawn in target dimension
+        let spawnY = findSafeSpawnPosition(mx, mz, 32, false);
+        const portalBlock = BlockType.NETHER_PORTAL;
+        useWorldStore.getState().setBlock(Math.floor(mx), Math.floor(spawnY.y), Math.floor(mz), portalBlock);
+        useWorldStore.getState().setBlock(Math.floor(mx), Math.floor(spawnY.y) + 1, Math.floor(mz), portalBlock);
+        useGameStore.getState().setDimension(targetDim);
+        console.log(`[Portal] Teleported to ${targetDim} at ${mx.toFixed(1)}, ${spawnY.y.toFixed(1)}, ${mz.toFixed(1)}`);
+      }
 
       // Lava and fire damage over time
       if (result.inLava) {
