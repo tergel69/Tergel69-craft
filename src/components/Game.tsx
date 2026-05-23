@@ -19,6 +19,7 @@ import CreativeInventory from './CreativeInventory';
 import PerformanceHUD from './PerformanceHUD';
 import DroppedItems from './DroppedItems';
 import XpOrbs from './XpOrbs';
+import SleepOverlay from './SleepOverlay';
 import DeathScreen from './DeathScreen';
 import ContainerScreen, { FurnaceProcessor } from './ContainerScreen';
 import { ensureAudioUnlocked } from '@/utils/audio';
@@ -139,6 +140,7 @@ export default function Game() {
       <MemoizedPauseMenu />
       <DeathScreen />
       <FurnaceProcessor />
+      <SleepOverlay />
       <PerformanceHUD />
       {gameState === 'playing' && <ClickToPlayHint />}
     </div>

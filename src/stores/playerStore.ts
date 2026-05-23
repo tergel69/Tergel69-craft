@@ -68,6 +68,10 @@ interface PlayerStore {
   // Selected hotbar slot
   selectedSlot: number;
 
+  // Bed spawn point
+  bedSpawn: { x: number; y: number; z: number } | null;
+  isSleeping: boolean;
+
   // Actions
   setPosition: (pos: Partial<PlayerPosition>) => void;
   setRotation: (rot: Partial<PlayerRotation>) => void;
@@ -94,6 +98,9 @@ interface PlayerStore {
   getVerticalSpeed: () => number;
   reset: () => void;
   setOxygen: (oxygen: number) => void;
+  setBedSpawn: (pos: { x: number; y: number; z: number } | null) => void;
+  sleep: () => void;
+  wakeUp: () => void;
 }
 
 const initialPosition = { x: 0, y: SEA_LEVEL + 8, z: 0 };
@@ -123,6 +130,8 @@ const initialState = {
   attackCooldown: 0,
   invulnerabilityTime: 0,
   selectedSlot: 0,
+  bedSpawn: null,
+  isSleeping: false,
 };
 
 export const usePlayerStore = create<PlayerStore>((set, get) => ({
@@ -267,9 +276,16 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
   setOxygen: (oxygen: number) => set({ oxygen: Math.max(0, Math.min(300, oxygen)) }),
 
   respawn: () => {
-    // Respawn near the current position so the player returns to the nearest surface.
-    const { position } = get();
-    const spawn = findSafeSpawnPosition(position.x, position.z, 64, true);
+    // Respawn at bed spawn if available, otherwise find safe position
+    const { bedSpawn } = get();
+    let spawn: { x: number; y: number; z: number };
+    
+    if (bedSpawn) {
+      spawn = findSafeSpawnPosition(bedSpawn.x, bedSpawn.z, 8, true);
+    } else {
+      const { position } = get();
+      spawn = findSafeSpawnPosition(position.x, position.z, 64, true);
+    }
 
     set({
       position: spawn,
@@ -306,6 +322,12 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
     }
     return 1.0; // Normal jump/swim speed
   },
+
+  setBedSpawn: (pos) => set({ bedSpawn: pos }),
+
+  sleep: () => set({ isSleeping: true }),
+
+  wakeUp: () => set({ isSleeping: false }),
 
   reset: () => set(initialState),
 }));

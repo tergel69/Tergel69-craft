@@ -17,7 +17,7 @@ import { useXpStore, getBlockXp, getMobXp } from '@/utils/experience';
 import { useInventoryStore } from '@/stores/inventoryStore';
 import { PLAYER_REACH } from '@/utils/constants';
 import { unifiedEntityManager as entityManager } from '@/entities/UnifiedEntityManager';
-import { ITEMS } from '@/data/items';
+import { ITEMS, ItemType } from '@/data/items';
 import { canEat, getFoodInfo } from '@/utils/foodUtils';
 import { getBlockDrop } from '@/utils/toolUtils';
 import {
@@ -379,6 +379,21 @@ export default function Player() {
     if (buttons.right && hit && curTime - lastPlaceTime.current > PLACE_COOLDOWN) {
       const { bx, by, bz, nx, ny, nz } = hit;
       const hitBlock = useWorldStore.getState().getBlock(bx, by, bz);
+
+      // Sleep in bed — only at night
+      const timeOfDay = useGameStore.getState().worldTime / 24000;
+      const isNight = timeOfDay > 0.5 && timeOfDay < 1;
+      const heldItem = selectedItemSlot.item;
+      if (heldItem === ItemType.BED && !playerState.isSleeping && isNight && gameMode === 'survival') {
+        // Place the bed then immediately sleep
+        usePlayerStore.getState().setBedSpawn({ x: bx, y: by, z: bz });
+        usePlayerStore.getState().sleep();
+        if (document.pointerLockElement) {
+          document.exitPointerLock();
+        }
+        lastPlaceTime.current = curTime;
+        return;
+      }
 
       // Open crafting table UI when right-clicking a crafting table
       if (hitBlock === BlockType.CRAFTING_TABLE) {
