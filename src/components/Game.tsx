@@ -20,6 +20,7 @@ import PerformanceHUD from './PerformanceHUD';
 import DroppedItems from './DroppedItems';
 import XpOrbs from './XpOrbs';
 import SleepOverlay from './SleepOverlay';
+import CropProcessor from './CropProcessor';
 import DeathScreen from './DeathScreen';
 import ContainerScreen, { FurnaceProcessor } from './ContainerScreen';
 import { ensureAudioUnlocked } from '@/utils/audio';
@@ -141,6 +142,7 @@ export default function Game() {
       <DeathScreen />
       <FurnaceProcessor />
       <SleepOverlay />
+      <CropProcessor />
       <PerformanceHUD />
       {gameState === 'playing' && <ClickToPlayHint />}
     </div>

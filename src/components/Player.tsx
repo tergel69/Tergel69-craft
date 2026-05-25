@@ -11,6 +11,7 @@ import { useKeyboard, useNumberKeys } from '@/hooks/useKeyboard';
 import { applyPhysics, canJump, getJumpVelocity, findSafeSpawnPosition } from '@/engine/Physics';
 import { BlockType } from '@/data/blocks';
 import { getBreakTime, isUnbreakable } from '@/data/blockHardness';
+import { isCropStageBlock, isFarmland, getCropBlock, applyBoneMeal } from './CropProcessor';
 import { getEfficiencyMultiplier, getSharpnessBonus } from '@/data/enchantments';
 import { useDroppedItemStore } from './DroppedItems';
 import { useXpStore, getBlockXp, getMobXp } from '@/utils/experience';
@@ -435,6 +436,42 @@ export default function Player() {
         storeFns.setGameState('enchanting');
         lastPlaceTime.current = curTime;
         return;
+      }
+
+      // ── Farming: Till soil with hoe ─────────────────────────────────
+      const heldToolType = typeof selectedItemSlot.item === 'string' ? ITEMS[selectedItemSlot.item]?.toolType : undefined;
+      if (heldToolType === 'hoe' && (hitBlock === BlockType.DIRT || hitBlock === BlockType.GRASS || hitBlock === BlockType.COARSE_DIRT)) {
+        useWorldStore.getState().setBlock(bx, by, bz, BlockType.FARMLAND);
+        inventoryStore.useDurability(selectedSlot, 1);
+        lastPlaceTime.current = curTime;
+        return;
+      }
+
+      // ── Farming: Plant seeds on farmland ────────────────────────────
+      if (isFarmland(hitBlock)) {
+        const seedType = selectedItemSlot.item;
+        if (typeof seedType === 'string') {
+          const cropBlock = getCropBlock(seedType);
+          if (cropBlock !== null) {
+            const aboveBlock = useWorldStore.getState().getBlock(bx, by + 1, bz);
+            if (aboveBlock === BlockType.AIR) {
+              useWorldStore.getState().setBlock(bx, by + 1, bz, cropBlock);
+              inventoryStore.removeItem(seedType, 1);
+              lastPlaceTime.current = curTime;
+              return;
+            }
+          }
+        }
+        return;
+      }
+
+      // ── Farming: Bone meal on crops ────────────────────────────────
+      if (selectedItemSlot.item === ItemType.BONE_MEAL && isCropStageBlock(hitBlock)) {
+        if (applyBoneMeal(bx, by, bz)) {
+          inventoryStore.removeItem(ItemType.BONE_MEAL, 1);
+          lastPlaceTime.current = curTime;
+          return;
+        }
       }
 
       const selectedItem = selectedItemSlot.item;
