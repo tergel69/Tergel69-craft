@@ -18,6 +18,7 @@ import BlockBreakOverlay from './BlockBreakOverlay';
 import CreativeInventory from './CreativeInventory';
 import PerformanceHUD from './PerformanceHUD';
 import DroppedItems from './DroppedItems';
+import Projectiles from './Projectiles';
 import XpOrbs from './XpOrbs';
 import SleepOverlay from './SleepOverlay';
 import CropProcessor from './CropProcessor';
@@ -123,6 +124,7 @@ export default function Game() {
             <World />
             <DroppedItems />
             <BlockBreakOverlay />
+            <Projectiles />
             <XpOrbs />
             <Entities />
             <PlayerModel />

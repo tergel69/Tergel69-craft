@@ -15,6 +15,7 @@ import { isCropStageBlock, isFarmland, getCropBlock, applyBoneMeal } from './Cro
 import { getEfficiencyMultiplier, getSharpnessBonus } from '@/data/enchantments';
 import { useDroppedItemStore } from './DroppedItems';
 import { useXpStore, getBlockXp, getMobXp } from '@/utils/experience';
+import { useProjectileStore, getArrowVelocity } from '@/utils/projectile';
 import { useInventoryStore } from '@/stores/inventoryStore';
 import { PLAYER_REACH } from '@/utils/constants';
 import { unifiedEntityManager as entityManager } from '@/entities/UnifiedEntityManager';
@@ -60,6 +61,16 @@ function getPlacementState(block: BlockType, ny: number, yaw: number): number {
     default:
       return 0;
   }
+}
+
+function getAvailableArrowType(gameMode: string): ItemType | null {
+  if (gameMode === 'creative') return ItemType.ARROW;
+
+  const inventory = useInventoryStore.getState();
+  if (inventory.hasItem(ItemType.ARROW)) return ItemType.ARROW;
+  if (inventory.hasItem(ItemType.SPECTRAL_ARROW)) return ItemType.SPECTRAL_ARROW;
+  if (inventory.hasItem(ItemType.TIPPED_ARROW)) return ItemType.TIPPED_ARROW;
+  return null;
 }
 
 // ── DDA voxel raycast ─────────────────────────────────────────────────────────
@@ -130,6 +141,8 @@ export default function Player() {
   const lastStepTimeRef = useRef(0);
   const lastDamageSoundRef = useRef(0);
   const portalTimerRef = useRef(0);
+  const bowChargeRef = useRef(0);
+  const bowChargingRef = useRef(false);
 
   // ── Hand animation refs ───────────────────────────────────────────────────
   const handRef       = useRef<THREE.Group>(null!);
@@ -294,12 +307,44 @@ export default function Player() {
     const playerStore = usePlayerStore.getState();
     const inventoryStore = useInventoryStore.getState();
     const selectedItemSlot = inventoryStore.getHotbarSlot(selectedSlot);
+    const isHoldingBow = selectedItemSlot.item === ItemType.BOW;
     const curTime  = performance.now() / 1000;
     const triggerDamageSound = (kind: 'hurt' | 'fire' | 'splash' = 'hurt') => {
       if (curTime - lastDamageSoundRef.current < 0.18) return;
       lastDamageSoundRef.current = curTime;
       playDamageSound(kind);
     };
+
+    const arrowType = getAvailableArrowType(gameMode);
+    if (isHoldingBow && buttons.right && arrowType) {
+      bowChargingRef.current = true;
+      bowChargeRef.current = Math.min(1, bowChargeRef.current + dt / 1.1);
+    } else if (bowChargingRef.current) {
+      const charge = bowChargeRef.current;
+      bowChargingRef.current = false;
+      bowChargeRef.current = 0;
+
+      if (charge >= 0.15 && (gameMode === 'creative' || arrowType !== null)) {
+        const velocity = getArrowVelocity(charge);
+        useProjectileStore.getState().shoot(
+          'arrow',
+          result.x + (ndx / len) * 0.75,
+          result.y + 1.45 + (ndy / len) * 0.75,
+          result.z + (ndz / len) * 0.75,
+          velocity.vx,
+          velocity.vy,
+          velocity.vz,
+          2 + charge * 6,
+          true
+        );
+
+        if (gameMode !== 'creative' && arrowType) {
+          inventoryStore.removeItem(arrowType, 1);
+        }
+        inventoryStore.useDurability(selectedSlot, 1);
+        lastPlaceTime.current = curTime;
+      }
+    }
 
     // Melee attack when not hitting a block
     if (buttons.left && !hit && playerState.attackCooldown <= 0) {
@@ -324,7 +369,19 @@ export default function Player() {
             ? ITEMS[held].attackDamage
             : 1;
         const sharpnessBonus = getSharpnessBonus(selectedItemSlot);
+        const wasDead = best.entity.isDead;
         best.entity.damage(weaponDamage + sharpnessBonus);
+        if (!wasDead && best.entity.isDead) {
+          const mobXp = getMobXp(best.entity.type);
+          if (mobXp > 0) {
+            useXpStore.getState().spawnOrbs(
+              mobXp,
+              best.entity.position.x,
+              best.entity.position.y + best.entity.height * 0.5,
+              best.entity.position.z
+            );
+          }
+        }
         inventoryStore.useDurability(selectedSlot, 1);
         usePlayerStore.setState({ attackCooldown: 0.3 });
         playHitSound();
@@ -380,6 +437,10 @@ export default function Player() {
 
     // Placement
     if (buttons.right && hit && curTime - lastPlaceTime.current > PLACE_COOLDOWN) {
+      if (isHoldingBow || selectedItemSlot.item === ItemType.CROSSBOW) {
+        return;
+      }
+
       const { bx, by, bz, nx, ny, nz } = hit;
       const hitBlock = useWorldStore.getState().getBlock(bx, by, bz);
 
